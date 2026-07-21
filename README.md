@@ -7,7 +7,7 @@ A spinning wheel for calling on students, built as a single static HTML page.
 This is a work in progress:
 
 - [x] Phase 1 — wheel, demo mode, teacher controls, round tracking
-- [ ] Phase 2 — separate teacher and projector views with same-browser sync
+- [x] Phase 2 — separate teacher and projector views with same-browser sync
 - [ ] Phase 3 — optional private Google Sheet backend (your roster, your key, never in this repo)
 - [ ] Phase 4 — full write-up and 15-minute setup guide
 

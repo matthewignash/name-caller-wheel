@@ -100,7 +100,7 @@
     transition: transform 0.15s, border-color 0.15s;
   }
 
-  .mode-btn:hover:not(:disabled), .mode-btn:focus-visible { transform: translateY(-2px); border-color: var(--brass); }
+  .mode-btn:hover, .mode-btn:focus-visible { transform: translateY(-2px); border-color: var(--brass); }
 
   .mode-btn.is-primary {
     background: var(--brass);
@@ -108,17 +108,11 @@
     color: #241a05;
   }
 
-  .mode-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-    transform: none;
-  }
+  .mode-hint { font-size: 0.8rem; color: var(--cream-dim); margin: 0; max-width: 440px; }
 
-  .mode-hint { font-size: 0.8rem; color: var(--cream-dim); margin: 0; }
+  /* ---------- Main layout (solo / teacher / projector) ---------- */
 
-  /* ---------- Solo (demo) layout ---------- */
-
-  #solo.is-active {
+  #main.is-active {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(300px, 420px);
     gap: 1.5rem;
@@ -130,10 +124,34 @@
   }
 
   @media (max-width: 900px) {
-    #solo.is-active {
+    #main.is-active {
       grid-template-columns: 1fr;
       align-items: start;
     }
+  }
+
+  body.mode-teacher #main.is-active {
+    grid-template-columns: 1fr;
+    max-width: 540px;
+    align-items: start;
+  }
+
+  body.mode-teacher .stage { display: none; }
+
+  body.mode-projector #main.is-active {
+    grid-template-columns: 1fr;
+    max-width: none;
+    padding: 1rem;
+  }
+
+  body.mode-projector .panel { display: none; }
+
+  body.mode-projector .wheel-wrap { width: min(86vh, 94vw); }
+
+  body.mode-projector .stage-class {
+    position: fixed;
+    top: 1rem;
+    left: 1.3rem;
   }
 
   /* ---------- Wheel stage ---------- */
@@ -346,6 +364,29 @@
 
   .panel-row label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 
+  #lastCall {
+    min-height: 1.2em;
+    font-size: 0.85rem;
+    color: var(--cream-dim);
+    text-align: center;
+  }
+
+  #lastCall strong { color: var(--brass); font-weight: 700; }
+
+  .projector-link { display: flex; gap: 0.5rem; align-items: center; }
+
+  .projector-link input {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.72rem;
+    color: var(--cream-dim);
+    background: var(--ink);
+    border: 1px solid var(--ink-line);
+    border-radius: 8px;
+    padding: 0.45rem 0.55rem;
+  }
+
   .text-btn {
     background: none;
     border: none;
@@ -404,6 +445,8 @@
   }
 
   .reveal-hint { color: var(--cream-dim); font-size: 0.9rem; margin-top: 1.5rem; }
+
+  body.mode-projector .reveal-hint { visibility: hidden; }
 
   @media (prefers-reduced-motion: reduce) {
     .reveal-name { animation: none; }
@@ -509,14 +552,14 @@
     <p class="tagline">Spin the wheel. Everyone gets a turn.</p>
   </div>
   <div class="mode-choices">
-    <button class="mode-btn" disabled title="Arrives in Phase 2">Teacher</button>
-    <button class="mode-btn" disabled title="Arrives in Phase 2">Projector</button>
+    <button class="mode-btn" id="enterTeacher">Teacher</button>
+    <button class="mode-btn" id="enterProjector">Projector</button>
     <button class="mode-btn is-primary" id="enterDemo">Try the Demo</button>
   </div>
-  <p class="mode-hint">Teacher and projector views arrive in Phase 2. The demo runs entirely in your browser.</p>
+  <p class="mode-hint">Teacher runs on your own device. Projector goes on the big screen and mirrors it. The demo combines both in one window with sample data.</p>
 </section>
 
-<section id="solo" class="view" aria-label="Name caller wheel">
+<section id="main" class="view" aria-label="Name caller wheel">
   <div class="stage">
     <div class="stage-class" id="stageClass"></div>
     <div class="wheel-wrap">
@@ -545,9 +588,15 @@
 
     <div class="panel-actions">
       <button class="spin-btn" id="spinBtn">SPIN</button>
+      <div id="lastCall" aria-live="polite"></div>
       <div class="panel-row">
         <label><span class="switch"><input type="checkbox" id="skipAnim"><span class="track"></span></span> Skip animation</label>
         <button class="text-btn" id="resetRoundBtn">Reset round</button>
+      </div>
+      <div class="projector-link">
+        <label class="visually-hidden" for="projectorUrl">Projector link</label>
+        <input id="projectorUrl" readonly>
+        <button class="icon-btn" id="copyProjectorUrl">Copy</button>
       </div>
     </div>
   </div>
@@ -703,6 +752,7 @@ function svgEl(tag, attrs = {}, text) {
 const wheel = {
   names: [],
   rotation: 0,
+  animToken: 0,
   group: document.getElementById('wheelGroup')
 };
 
@@ -750,6 +800,7 @@ function buildWheel(names) {
     );
     return;
   }
+  wheel.paletteKey = app.settings.palette;
   const palette = PALETTES[app.settings.palette] || PALETTES.carnival;
   const colors = segmentColors(names.length, palette);
   const seg = 360 / names.length;
@@ -802,12 +853,14 @@ function finalRotationFor(targetIndex, count, seed) {
 const easeOutQuart = t => 1 - (1 - t) ** 4;
 
 function animateSpin(finalRotation, durationMs, onDone) {
+  const token = ++wheel.animToken;
   const start = wheel.rotation;
   const delta = finalRotation - start;
   const t0 = performance.now();
   let lastSegment = segmentUnderPointer();
 
   function frame(now) {
+    if (token !== wheel.animToken) return;
     const t = Math.min(1, (now - t0) / durationMs);
     setRotation(start + delta * easeOutQuart(t));
     const seg = segmentUnderPointer();
@@ -899,63 +952,108 @@ const audio = {
   }
 };
 
-/* ================= App state + command bus ================= */
+/* ================= App state ================= */
 
 const app = {
+  mode: null,
   store: null,
   data: null,
   currentClass: '',
   settings: { ...SAMPLE_DATA.settings },
   skipAnim: false,
   spinning: false,
-  executedCommands: new Set()
+  executedCommands: new Set(),
+  revealTimer: null
 };
 
 const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const commandHandlers = {
+const isRenderer = () => app.mode === 'solo' || app.mode === 'projector';
+const isController = () => app.mode === 'solo' || app.mode === 'teacher';
+
+/* ================= Sync channel (BroadcastChannel, same browser) ================= */
+
+const channel = 'BroadcastChannel' in window ? new BroadcastChannel('name-caller-wheel') : null;
+
+function broadcast(msg) {
+  channel?.postMessage(msg);
+}
+
+channel?.addEventListener('message', e => {
+  const msg = e.data;
+  if (app.mode === 'projector' && msg.type !== 'REQUEST_SYNC') executeCommand(msg);
+  else if (isController() && msg.type === 'REQUEST_SYNC') broadcast(syncCommand());
+});
+
+/* ================= Command protocol =================
+   The teacher (or solo) view decides every outcome and is the only writer.
+   The projector is a pure renderer: it executes commands and never decides. */
+
+function snapshot() {
+  return { className: app.currentClass, activeNames: activeNames(), settings: { ...app.settings } };
+}
+
+function syncCommand() {
+  return { type: 'SYNC', id: newCommandId(), ...snapshot() };
+}
+
+function dispatch(cmd) {
+  broadcast(cmd);
+  executeCommand(cmd);
+}
+
+function executeCommand(cmd) {
+  if (app.executedCommands.has(cmd.id)) return;
+  app.executedCommands.add(cmd.id);
+  if (isRenderer()) rendererHandlers[cmd.type]?.(cmd);
+  if (isController()) controllerHandlers[cmd.type]?.(cmd);
+}
+
+const sameArray = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+const rendererHandlers = {
   SPIN(cmd) {
+    applySnapshot(cmd);
+    dismissReveal();
     const idx = wheel.names.indexOf(cmd.target);
     if (idx < 0) return;
     app.spinning = true;
-    ui.spinBtn.disabled = true;
     const finish = () => {
       app.spinning = false;
-      ui.spinBtn.disabled = false;
       reveal(cmd.target);
     };
+    const finalRotation = finalRotationFor(idx, wheel.names.length, cmd.seed);
     if (cmd.skipAnim || prefersReducedMotion) {
-      setRotation(finalRotationFor(idx, wheel.names.length, cmd.seed));
+      setRotation(finalRotation);
       finish();
     } else {
-      animateSpin(finalRotationFor(idx, wheel.names.length, cmd.seed), app.settings.spinSeconds * 1000, finish);
+      animateSpin(finalRotation, cmd.durationMs, finish);
     }
   },
-  SWITCH_CLASS(cmd) {
-    app.currentClass = cmd.className;
-    renderStage();
-    renderRoster();
-    buildWheel(activeNames());
-  },
-  ROSTER_CHANGED() {
-    renderRoster();
-    buildWheel(activeNames());
-  },
-  RESET_ROUND() {
-    renderRoster();
-  }
+  SYNC: applySnapshot,
+  SWITCH_CLASS: applySnapshot,
+  ROSTER_CHANGED: applySnapshot,
+  RESET_ROUND() {}
 };
 
-function dispatch(cmd) {
-  if (app.executedCommands.has(cmd.id)) return;
-  app.executedCommands.add(cmd.id);
-  commandHandlers[cmd.type]?.(cmd);
+function applySnapshot(cmd) {
+  ui.stageClass.textContent = cmd.className;
+  if (cmd.settings) app.settings = { ...app.settings, ...cmd.settings };
+  if (!sameArray(wheel.names, cmd.activeNames) || wheel.paletteKey !== app.settings.palette) {
+    buildWheel(cmd.activeNames);
+  }
 }
+
+const controllerHandlers = {
+  SWITCH_CLASS() { renderClassSelect(); renderRoster(); },
+  ROSTER_CHANGED() { renderRoster(); },
+  RESET_ROUND() { renderRoster(); }
+};
 
 /* ================= Selection logic (pure) ================= */
 
-function roster() { return app.data.rosters[app.currentClass] || []; }
-function calledList() { return app.data.called[app.currentClass] || []; }
+function roster() { return app.data?.rosters[app.currentClass] || []; }
+function calledList() { return app.data?.called[app.currentClass] || []; }
 function activeNames() { return roster().filter(s => s.active).map(s => s.name); }
 function eligiblePool() { return activeNames().filter(n => !calledList().includes(n)); }
 
@@ -969,34 +1067,58 @@ async function recordCall(student, method) {
   await app.store.logCall({ className: app.currentClass, student, method });
   if (!calledList().includes(student)) app.data.called[app.currentClass].push(student);
   renderRoster();
+  setLastCall(student, method);
+}
+
+function spinCommand(target, seed) {
+  return {
+    type: 'SPIN',
+    id: newCommandId(),
+    target,
+    seed,
+    skipAnim: app.skipAnim,
+    durationMs: app.settings.spinSeconds * 1000,
+    ...snapshot()
+  };
+}
+
+function startSpinCooldown(cmd) {
+  if (cmd.skipAnim) return;
+  ui.spinBtn.disabled = true;
+  setTimeout(() => { ui.spinBtn.disabled = false; }, cmd.durationMs + 300);
 }
 
 async function spinRandom() {
-  if (app.spinning) return;
+  if (ui.spinBtn.disabled) return;
   const pool = eligiblePool();
   if (pool.length === 0) return promptReset(true);
   const seed = newSeed();
   const winner = pickWinner(pool, mulberry32(seed));
   await recordCall(winner, 'spin');
-  dispatch({ type: 'SPIN', id: newCommandId(), className: app.currentClass, target: winner, seed, skipAnim: app.skipAnim });
+  const cmd = spinCommand(winner, seed);
+  startSpinCooldown(cmd);
+  dispatch(cmd);
 }
 
 async function callStudent(student) {
-  if (app.spinning) return;
+  if (ui.spinBtn.disabled) return;
   await recordCall(student, 'pick');
-  dispatch({ type: 'SPIN', id: newCommandId(), className: app.currentClass, target: student, seed: newSeed(), skipAnim: app.skipAnim });
+  const cmd = spinCommand(student, newSeed());
+  startSpinCooldown(cmd);
+  dispatch(cmd);
 }
 
-async function switchClass(className) {
+function switchClass(className) {
   if (app.spinning) return;
-  dispatch({ type: 'SWITCH_CLASS', id: newCommandId(), className });
+  app.currentClass = className;
+  dispatch({ type: 'SWITCH_CLASS', id: newCommandId(), ...snapshot() });
 }
 
 async function toggleActive(student, active) {
   await app.store.setActive({ className: app.currentClass, student, active });
   const row = roster().find(s => s.name === student);
   if (row) row.active = active;
-  dispatch({ type: 'ROSTER_CHANGED', id: newCommandId(), className: app.currentClass });
+  dispatch({ type: 'ROSTER_CHANGED', id: newCommandId(), ...snapshot() });
 }
 
 async function resetRound() {
@@ -1009,11 +1131,13 @@ async function resetRound() {
 
 const ui = {
   landing: document.getElementById('landing'),
-  solo: document.getElementById('solo'),
+  main: document.getElementById('main'),
   stageClass: document.getElementById('stageClass'),
   classSelect: document.getElementById('classSelect'),
   rosterList: document.getElementById('rosterList'),
   spinBtn: document.getElementById('spinBtn'),
+  lastCall: document.getElementById('lastCall'),
+  projectorUrl: document.getElementById('projectorUrl'),
   reveal: document.getElementById('reveal'),
   revealClass: document.getElementById('revealClass'),
   revealName: document.getElementById('revealName'),
@@ -1023,10 +1147,6 @@ const ui = {
   resetDialog: document.getElementById('resetDialog'),
   resetMessage: document.getElementById('resetMessage')
 };
-
-function renderStage() {
-  ui.stageClass.textContent = app.currentClass;
-}
 
 function renderClassSelect() {
   ui.classSelect.replaceChildren(
@@ -1057,16 +1177,25 @@ function renderRoster() {
   ui.rosterList.replaceChildren(...roster().map(s => rosterRow(s, called.includes(s.name))));
 }
 
+function setLastCall(student, method) {
+  ui.lastCall.replaceChildren('Called: ', el('strong', {}, student), method === 'pick' ? ' (your pick)' : '');
+}
+
 function reveal(name) {
-  ui.revealClass.textContent = app.currentClass;
+  ui.revealClass.textContent = app.currentClass || ui.stageClass.textContent;
   ui.revealName.textContent = name;
   ui.reveal.classList.add('is-open');
   ui.announcer.textContent = `${name} was called`;
   if (app.settings.confetti) confetti.burst();
   audio.fanfare();
+  if (app.mode === 'projector') {
+    clearTimeout(app.revealTimer);
+    app.revealTimer = setTimeout(dismissReveal, 10000);
+  }
 }
 
 function dismissReveal() {
+  clearTimeout(app.revealTimer);
   ui.reveal.classList.remove('is-open');
 }
 
@@ -1079,7 +1208,20 @@ function promptReset(fromEmptyPool) {
 
 /* ================= Wiring ================= */
 
-document.getElementById('enterDemo').addEventListener('click', () => enterSolo(createDemoStore()));
+const projectorUrl = () => `${location.href.split('?')[0]}?view=projector`;
+
+document.getElementById('enterDemo').addEventListener('click', () => {
+  history.replaceState(null, '', '?view=demo');
+  enterController('solo');
+});
+document.getElementById('enterTeacher').addEventListener('click', () => {
+  history.replaceState(null, '', '?view=teacher');
+  enterController('teacher');
+});
+document.getElementById('enterProjector').addEventListener('click', () => {
+  history.replaceState(null, '', '?view=projector');
+  enterProjector();
+});
 
 ui.classSelect.addEventListener('change', e => switchClass(e.target.value));
 
@@ -1096,6 +1238,15 @@ ui.rosterList.addEventListener('click', e => {
 ui.spinBtn.addEventListener('click', spinRandom);
 document.getElementById('skipAnim').addEventListener('change', e => { app.skipAnim = e.target.checked; });
 document.getElementById('resetRoundBtn').addEventListener('click', () => promptReset(false));
+
+document.getElementById('copyProjectorUrl').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(ui.projectorUrl.value);
+  } catch {
+    ui.projectorUrl.select();
+    document.execCommand('copy');
+  }
+});
 
 ui.reveal.addEventListener('click', dismissReveal);
 addEventListener('keydown', e => {
@@ -1127,25 +1278,46 @@ for (const [id, key, read] of [
   document.getElementById(id).addEventListener('change', async e => {
     app.settings[key] = read(e.target);
     await app.store.saveSettings({ [key]: app.settings[key] });
-    if (key === 'palette') buildWheel(activeNames());
+    dispatch(syncCommand());
   });
 }
 
 /* ================= Boot ================= */
 
-async function enterSolo(store) {
-  app.store = store;
-  app.data = await store.getData();
+async function enterController(mode) {
+  app.mode = mode;
+  app.store = createDemoStore();
+  app.data = await app.store.getData();
   app.settings = { ...app.settings, ...app.data.settings };
   app.currentClass = app.data.classes[0];
+  document.body.classList.toggle('mode-teacher', mode === 'teacher');
   ui.landing.classList.remove('is-active');
-  ui.solo.classList.add('is-active');
-  ui.demoBadge.classList.toggle('is-visible', store.isDemo);
-  renderStage();
+  ui.main.classList.add('is-active');
+  ui.demoBadge.classList.toggle('is-visible', app.store.isDemo);
+  ui.projectorUrl.value = projectorUrl();
+  ui.stageClass.textContent = app.currentClass;
   renderClassSelect();
   renderRoster();
-  buildWheel(activeNames());
+  if (mode === 'solo') buildWheel(activeNames());
+  broadcast(syncCommand());
 }
+
+function enterProjector() {
+  app.mode = 'projector';
+  document.body.classList.add('mode-projector');
+  ui.landing.classList.remove('is-active');
+  ui.main.classList.add('is-active');
+  ui.demoBadge.classList.add('is-visible');
+  const firstClass = Object.keys(SAMPLE_DATA.classes)[0];
+  ui.stageClass.textContent = firstClass;
+  buildWheel(SAMPLE_DATA.classes[firstClass]);
+  broadcast({ type: 'REQUEST_SYNC' });
+}
+
+const requestedView = new URLSearchParams(location.search).get('view');
+if (requestedView === 'projector') enterProjector();
+else if (requestedView === 'teacher') enterController('teacher');
+else if (requestedView === 'demo') enterController('solo');
 </script>
 </body>
 </html>
