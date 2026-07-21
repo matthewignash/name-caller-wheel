@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Name Caller Wheel</title>
+<style>
+  :root {
+    --ink: #0e1420;
+    --ink-raise: #17202f;
+    --ink-line: rgba(246, 241, 229, 0.12);
+    --cream: #f6f1e5;
+    --cream-dim: rgba(246, 241, 229, 0.62);
+    --brass: #e8b34b;
+    --brass-deep: #b9862c;
+    --danger: #e5484d;
+    --display: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    font-family: var(--body);
+    color: var(--cream);
+    background:
+      radial-gradient(120% 90% at 50% 0%, #1b2638 0%, var(--ink) 55%, #0a0f18 100%);
+    background-attachment: fixed;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  }
+
+  button {
+    font-family: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .view { display: none; }
+  .view.is-active { display: block; }
+
+  /* ---------- Landing ---------- */
+
+  #landing.is-active {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.6rem;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .wordmark {
+    font-family: var(--display);
+    font-size: clamp(2.4rem, 7vw, 4.2rem);
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.05;
+    margin: 0;
+  }
+
+  .wordmark em {
+    font-style: normal;
+    color: var(--brass);
+  }
+
+  .tagline {
+    margin: 0.7rem 0 0;
+    color: var(--cream-dim);
+    font-size: 1.05rem;
+  }
+
+  .mode-choices {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .mode-btn {
+    font-family: var(--display);
+    font-size: 1.15rem;
+    font-weight: 700;
+    padding: 1rem 2.2rem;
+    border-radius: 999px;
+    border: 1.5px solid var(--ink-line);
+    background: var(--ink-raise);
+    transition: transform 0.15s, border-color 0.15s;
+  }
+
+  .mode-btn:hover:not(:disabled), .mode-btn:focus-visible { transform: translateY(-2px); border-color: var(--brass); }
+
+  .mode-btn.is-primary {
+    background: var(--brass);
+    border-color: var(--brass);
+    color: #241a05;
+  }
+
+  .mode-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .mode-hint { font-size: 0.8rem; color: var(--cream-dim); margin: 0; }
+
+  /* ---------- Solo (demo) layout ---------- */
+
+  #solo.is-active {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(300px, 420px);
+    gap: 1.5rem;
+    min-height: 100dvh;
+    padding: 1.5rem;
+    align-items: center;
+    max-width: 1300px;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 900px) {
+    #solo.is-active {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+  }
+
+  /* ---------- Wheel stage ---------- */
+
+  .stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8rem;
+  }
+
+  .stage-class {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 1.1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--cream-dim);
+  }
+
+  .wheel-wrap {
+    position: relative;
+    width: min(92vw, 640px);
+    aspect-ratio: 1;
+  }
+
+  .wheel-svg { width: 100%; height: 100%; display: block; }
+
+  #wheelGroup { will-change: transform; }
+
+  .pointer {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    translate: -50% 0;
+    width: 46px;
+    height: 52px;
+    z-index: 2;
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+  }
+
+  /* ---------- Control panel ---------- */
+
+  .panel {
+    background: var(--ink-raise);
+    border: 1px solid var(--ink-line);
+    border-radius: 18px;
+    padding: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-height: calc(100dvh - 3rem);
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+  }
+
+  .panel-head h2 {
+    font-family: var(--display);
+    font-size: 1.05rem;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+
+  .icon-btn {
+    background: none;
+    border: 1px solid var(--ink-line);
+    border-radius: 10px;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+    color: var(--cream-dim);
+  }
+
+  .icon-btn:hover, .icon-btn:focus-visible { border-color: var(--brass); color: var(--cream); }
+
+  select {
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--cream);
+    background: var(--ink);
+    border: 1px solid var(--ink-line);
+    border-radius: 10px;
+    padding: 0.55rem 0.7rem;
+    width: 100%;
+  }
+
+  .roster {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 120px;
+    border-top: 1px solid var(--ink-line);
+    border-bottom: 1px solid var(--ink-line);
+  }
+
+  .roster li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.2rem;
+    border-bottom: 1px solid rgba(246, 241, 229, 0.05);
+  }
+
+  .roster li:last-child { border-bottom: none; }
+
+  .roster .student-name { flex: 1; font-size: 0.95rem; }
+
+  .roster li.is-inactive .student-name { opacity: 0.4; text-decoration: line-through; }
+
+  .badge-called {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--brass);
+    border: 1px solid var(--brass-deep);
+    border-radius: 999px;
+    padding: 0.12rem 0.5rem;
+  }
+
+  .call-btn {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    opacity: 0.45;
+    padding: 0.2rem 0.35rem;
+    border-radius: 8px;
+  }
+
+  .call-btn:hover, .call-btn:focus-visible { opacity: 1; background: rgba(232, 179, 75, 0.15); }
+
+  .switch {
+    position: relative;
+    width: 34px;
+    height: 20px;
+    flex: none;
+  }
+
+  .switch input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .switch .track {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: rgba(246, 241, 229, 0.18);
+    transition: background 0.15s;
+    pointer-events: none;
+  }
+
+  .switch .track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--cream);
+    transition: translate 0.15s;
+  }
+
+  .switch input:checked + .track { background: var(--brass-deep); }
+  .switch input:checked + .track::after { translate: 14px 0; }
+  .switch input:focus-visible + .track { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  .panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .spin-btn {
+    font-family: var(--display);
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    padding: 0.9rem;
+    border-radius: 14px;
+    border: none;
+    background: linear-gradient(180deg, #f2c56a, var(--brass) 55%, var(--brass-deep));
+    color: #241a05;
+    box-shadow: 0 4px 14px rgba(232, 179, 75, 0.35);
+    transition: transform 0.12s;
+  }
+
+  .spin-btn:hover:not(:disabled), .spin-btn:focus-visible { transform: translateY(-2px); }
+  .spin-btn:disabled { opacity: 0.55; cursor: wait; box-shadow: none; }
+
+  .panel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    font-size: 0.9rem;
+    color: var(--cream-dim);
+  }
+
+  .panel-row label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+
+  .text-btn {
+    background: none;
+    border: none;
+    color: var(--cream-dim);
+    font-size: 0.9rem;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    padding: 0.2rem;
+  }
+
+  .text-btn:hover, .text-btn:focus-visible { color: var(--danger); }
+
+  /* ---------- Reveal ---------- */
+
+  #reveal {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    text-align: center;
+    padding: 2rem;
+    background: radial-gradient(90% 90% at 50% 45%, rgba(27, 38, 56, 0.96), rgba(10, 15, 24, 0.98));
+    border: none;
+    color: var(--cream);
+  }
+
+  #reveal.is-open { display: flex; }
+
+  .reveal-class {
+    font-family: var(--display);
+    font-size: 1.1rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cream-dim);
+    margin: 0;
+  }
+
+  .reveal-name {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(3rem, 14vw, 9rem);
+    line-height: 1.05;
+    margin: 0;
+    color: var(--brass);
+    text-shadow: 0 6px 30px rgba(232, 179, 75, 0.35);
+    animation: reveal-pop 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+
+  @keyframes reveal-pop {
+    from { transform: scale(0.6); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .reveal-hint { color: var(--cream-dim); font-size: 0.9rem; margin-top: 1.5rem; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal-name { animation: none; }
+    .mode-btn, .spin-btn { transition: none; }
+  }
+
+  /* ---------- Confetti ---------- */
+
+  #confetti {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    pointer-events: none;
+  }
+
+  /* ---------- Dialogs ---------- */
+
+  dialog {
+    background: var(--ink-raise);
+    color: var(--cream);
+    border: 1px solid var(--ink-line);
+    border-radius: 16px;
+    padding: 1.4rem;
+    max-width: 380px;
+    width: calc(100vw - 2rem);
+  }
+
+  dialog::backdrop { background: rgba(6, 9, 14, 0.7); }
+
+  dialog h2 {
+    font-family: var(--display);
+    font-size: 1.15rem;
+    margin: 0 0 0.9rem;
+  }
+
+  dialog p { color: var(--cream-dim); font-size: 0.95rem; }
+
+  .dialog-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0;
+    font-size: 0.95rem;
+  }
+
+  .dialog-field input[type="range"] { width: 150px; accent-color: var(--brass); }
+  .dialog-field select { width: 150px; }
+
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.7rem;
+    margin-top: 1.1rem;
+  }
+
+  .btn {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    border-radius: 10px;
+    padding: 0.55rem 1.2rem;
+    border: 1px solid var(--ink-line);
+    background: none;
+  }
+
+  .btn.is-primary { background: var(--brass); border-color: var(--brass); color: #241a05; }
+  .btn.is-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+  /* ---------- Demo badge ---------- */
+
+  #demoBadge {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 10;
+    display: none;
+    font-size: 0.78rem;
+    color: var(--cream-dim);
+    background: rgba(14, 20, 32, 0.85);
+    border: 1px solid var(--ink-line);
+    border-radius: 999px;
+    padding: 0.4rem 0.9rem;
+    backdrop-filter: blur(4px);
+  }
+
+  #demoBadge.is-visible { display: block; }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+</style>
+</head>
+<body>
+
+<section id="landing" class="view is-active" aria-label="Choose a mode">
+  <div>
+    <h1 class="wordmark">Name Caller <em>Wheel</em></h1>
+    <p class="tagline">Spin the wheel. Everyone gets a turn.</p>
+  </div>
+  <div class="mode-choices">
+    <button class="mode-btn" disabled title="Arrives in Phase 2">Teacher</button>
+    <button class="mode-btn" disabled title="Arrives in Phase 2">Projector</button>
+    <button class="mode-btn is-primary" id="enterDemo">Try the Demo</button>
+  </div>
+  <p class="mode-hint">Teacher and projector views arrive in Phase 2. The demo runs entirely in your browser.</p>
+</section>
+
+<section id="solo" class="view" aria-label="Name caller wheel">
+  <div class="stage">
+    <div class="stage-class" id="stageClass"></div>
+    <div class="wheel-wrap">
+      <svg class="pointer" viewBox="0 0 46 52" aria-hidden="true">
+        <path d="M23 50 L4 10 Q23 -6 42 10 Z" fill="#e8b34b" stroke="#8a6420" stroke-width="2"/>
+        <circle cx="23" cy="14" r="5" fill="#241a05"/>
+      </svg>
+      <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Spinning wheel of student names">
+        <g id="wheelGroup"></g>
+        <circle cx="500" cy="500" r="484" fill="none" stroke="#e8b34b" stroke-width="10"/>
+        <circle cx="500" cy="500" r="58" fill="#17202f" stroke="#e8b34b" stroke-width="6"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Teacher panel</h2>
+      <button class="icon-btn" id="openSettings">Settings</button>
+    </div>
+
+    <label class="visually-hidden" for="classSelect">Class</label>
+    <select id="classSelect"></select>
+
+    <ul class="roster" id="rosterList"></ul>
+
+    <div class="panel-actions">
+      <button class="spin-btn" id="spinBtn">SPIN</button>
+      <div class="panel-row">
+        <label><span class="switch"><input type="checkbox" id="skipAnim"><span class="track"></span></span> Skip animation</label>
+        <button class="text-btn" id="resetRoundBtn">Reset round</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="reveal" role="dialog" aria-modal="true" aria-labelledby="revealName">
+  <p class="reveal-class" id="revealClass"></p>
+  <p class="reveal-name" id="revealName"></p>
+  <p class="reveal-hint">Tap anywhere to continue</p>
+</div>
+
+<canvas id="confetti"></canvas>
+
+<dialog id="settingsDialog" aria-labelledby="settingsTitle">
+  <h2 id="settingsTitle">Settings</h2>
+  <div class="dialog-field">
+    <label for="setDuration">Spin length</label>
+    <input type="range" id="setDuration" min="3" max="8" step="1">
+  </div>
+  <div class="dialog-field">
+    <label for="setPalette">Wheel colors</label>
+    <select id="setPalette">
+      <option value="carnival">Carnival</option>
+      <option value="ocean">Ocean</option>
+      <option value="meadow">Meadow</option>
+    </select>
+  </div>
+  <div class="dialog-field">
+    <label for="setConfetti">Confetti</label>
+    <span class="switch"><input type="checkbox" id="setConfetti"><span class="track"></span></span>
+  </div>
+  <div class="dialog-field">
+    <label for="setSound">Sound</label>
+    <span class="switch"><input type="checkbox" id="setSound"><span class="track"></span></span>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn" id="settingsClose">Close</button>
+  </div>
+</dialog>
+
+<dialog id="resetDialog" aria-labelledby="resetTitle">
+  <h2 id="resetTitle">Reset the round?</h2>
+  <p id="resetMessage"></p>
+  <div class="dialog-actions">
+    <button class="btn" id="resetCancel">Cancel</button>
+    <button class="btn is-danger" id="resetConfirm">Reset round</button>
+  </div>
+</dialog>
+
+<div id="demoBadge">Sample data. Connect your own Sheet in Settings.</div>
+<div class="visually-hidden" aria-live="polite" id="announcer"></div>
+
+<script>
+'use strict';
+
+/* ================= Sample data (demo mode) ================= */
+
+const SAMPLE_DATA = {
+  classes: {
+    'Demo Bio': [
+      'Charles D.', 'Gregor M.', 'Rosalind F.', 'Barbara M.', 'Lynn M.', 'Rachel C.',
+      'Jane G.', 'Louis P.', 'Alexander F.', 'Mary A.', 'Carl L.', 'Antonie L.'
+    ],
+    'Demo Chem': [
+      'Marie C.', 'Dmitri M.', 'Antoine L.', 'Amedeo A.', 'Robert B.', 'John D.',
+      'Michael F.', 'Fritz H.', 'Dorothy H.', 'August K.', 'Irving L.', 'Gilbert L.',
+      'Lise M.', 'Henri M.', 'Alfred N.', 'Ida N.', 'Linus P.', 'Marguerite P.',
+      'William R.', 'Ernest R.', 'Glenn S.', 'Frederick S.', 'Harold U.', 'Alessandro V.'
+    ]
+  },
+  settings: { spinSeconds: 5, palette: 'carnival', confetti: true, sound: false }
+};
+
+const PALETTES = {
+  carnival: ['#e5484d', '#e8b34b', '#3fa66a', '#3b82c4', '#8e6fc4', '#d97d3e', '#2ba5a0', '#c95d8f'],
+  ocean: ['#155e75', '#0e7490', '#0891b2', '#22a3bd', '#67c3d4', '#2b6cb0', '#3b82c4', '#1e4e79'],
+  meadow: ['#3fa66a', '#7cb342', '#c0ca33', '#e8b34b', '#8d6e63', '#558b2f', '#2ba5a0', '#a1887f']
+};
+
+function createDemoStore() {
+  const rosters = {};
+  for (const [cls, names] of Object.entries(SAMPLE_DATA.classes)) {
+    rosters[cls] = names.map(name => ({ name, active: true }));
+  }
+  const called = Object.fromEntries(Object.keys(rosters).map(cls => [cls, []]));
+  const log = [];
+  const settings = { ...SAMPLE_DATA.settings };
+
+  return {
+    isDemo: true,
+    async getData() {
+      return {
+        classes: Object.keys(rosters),
+        rosters: structuredClone(rosters),
+        called: structuredClone(called),
+        settings: { ...settings }
+      };
+    },
+    async logCall({ className, student, method }) {
+      log.push({ timestamp: new Date().toISOString(), className, student, method, note: '' });
+      if (!called[className].includes(student)) called[className].push(student);
+    },
+    async setActive({ className, student, active }) {
+      const row = rosters[className].find(s => s.name === student);
+      if (row) row.active = active;
+    },
+    async resetRound({ className }) {
+      called[className] = [];
+      log.push({ timestamp: new Date().toISOString(), className, student: '', method: 'reset', note: '' });
+    },
+    async saveSettings(patch) {
+      Object.assign(settings, patch);
+    }
+  };
+}
+
+/* ================= Deterministic randomness ================= */
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
+const newCommandId = () => crypto.randomUUID();
+
+/* ================= DOM helpers (no innerHTML for dynamic content) ================= */
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === 'class') node.className = value;
+    else node.setAttribute(key, value);
+  }
+  node.append(...children);
+  return node;
+}
+
+function svgEl(tag, attrs = {}, text) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/* ================= Wheel geometry + animation ================= */
+
+const wheel = {
+  names: [],
+  rotation: 0,
+  group: document.getElementById('wheelGroup')
+};
+
+const CX = 500, CY = 500, R = 478;
+
+function polar(radius, deg) {
+  const rad = deg * Math.PI / 180;
+  return { x: CX + radius * Math.cos(rad), y: CY + radius * Math.sin(rad) };
+}
+
+function segmentPath(startDeg, endDeg) {
+  const s = polar(R, startDeg), e = polar(R, endDeg);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  return `M ${CX} ${CY} L ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${R} ${R} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)} Z`;
+}
+
+function textColorFor(hex) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#241a05' : '#f6f1e5';
+}
+
+function segmentColors(count, palette) {
+  const colors = Array.from({ length: count }, (_, i) => palette[i % palette.length]);
+  if (count > 1 && colors[count - 1] === colors[0]) {
+    colors[count - 1] = palette[(count + Math.floor(palette.length / 2)) % palette.length];
+  }
+  return colors;
+}
+
+function labelFontSize(count, names) {
+  const arcHeight = (2 * Math.PI * R * 0.68) / count;
+  const longest = Math.max(...names.map(n => n.length), 1);
+  const byArc = arcHeight * 0.5;
+  const byWidth = (R * 0.62) / (longest * 0.58);
+  return Math.max(13, Math.min(40, byArc, byWidth));
+}
+
+function buildWheel(names) {
+  wheel.names = names;
+  wheel.group.replaceChildren();
+  if (names.length === 0) {
+    wheel.group.append(
+      svgEl('circle', { cx: CX, cy: CY, r: R, fill: '#17202f' }),
+      svgEl('text', { x: CX, y: CY, fill: '#f6f1e5', 'font-size': 34, 'text-anchor': 'middle' }, 'No active students')
+    );
+    return;
+  }
+  const palette = PALETTES[app.settings.palette] || PALETTES.carnival;
+  const colors = segmentColors(names.length, palette);
+  const seg = 360 / names.length;
+  const fontSize = labelFontSize(names.length, names);
+
+  names.forEach((name, i) => {
+    const start = -90 + i * seg, mid = start + seg / 2;
+    wheel.group.append(names.length === 1
+      ? svgEl('circle', { cx: CX, cy: CY, r: R, fill: colors[i] })
+      : svgEl('path', { d: segmentPath(start, start + seg), fill: colors[i], stroke: '#0e1420', 'stroke-width': 2 }));
+    const anchor = polar(R * 0.94, mid);
+    wheel.group.append(svgEl('text', {
+      x: anchor.x.toFixed(2),
+      y: anchor.y.toFixed(2),
+      transform: `rotate(${mid.toFixed(2)} ${anchor.x.toFixed(2)} ${anchor.y.toFixed(2)})`,
+      fill: textColorFor(colors[i]),
+      'font-size': fontSize.toFixed(1),
+      'font-family': 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif',
+      'font-weight': 700,
+      'text-anchor': 'end',
+      'dominant-baseline': 'middle'
+    }, name));
+  });
+  setRotation(wheel.rotation);
+}
+
+function setRotation(deg) {
+  wheel.rotation = deg;
+  wheel.group.setAttribute('transform', `rotate(${deg} ${CX} ${CY})`);
+}
+
+function segmentUnderPointer() {
+  const count = wheel.names.length;
+  if (!count) return -1;
+  const seg = 360 / count;
+  const pointerAngle = ((-wheel.rotation % 360) + 360) % 360;
+  return Math.floor(pointerAngle / seg) % count;
+}
+
+function finalRotationFor(targetIndex, count, seed) {
+  const rng = mulberry32(seed);
+  const seg = 360 / count;
+  const within = 0.18 + 0.64 * rng();
+  const landing = (360 - ((targetIndex + within) * seg) % 360) % 360;
+  const turns = 4 + Math.floor(rng() * 3);
+  const base = Math.ceil(wheel.rotation / 360) * 360;
+  return base + turns * 360 + landing;
+}
+
+const easeOutQuart = t => 1 - (1 - t) ** 4;
+
+function animateSpin(finalRotation, durationMs, onDone) {
+  const start = wheel.rotation;
+  const delta = finalRotation - start;
+  const t0 = performance.now();
+  let lastSegment = segmentUnderPointer();
+
+  function frame(now) {
+    const t = Math.min(1, (now - t0) / durationMs);
+    setRotation(start + delta * easeOutQuart(t));
+    const seg = segmentUnderPointer();
+    if (seg !== lastSegment) { lastSegment = seg; audio.tick(); }
+    if (t < 1) requestAnimationFrame(frame);
+    else onDone();
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ================= Confetti ================= */
+
+const confetti = {
+  canvas: document.getElementById('confetti'),
+  particles: [],
+  running: false,
+  burst() {
+    const ctx = this.canvas.getContext('2d');
+    this.canvas.width = innerWidth;
+    this.canvas.height = innerHeight;
+    const palette = PALETTES[app.settings.palette] || PALETTES.carnival;
+    for (let i = 0; i < 160; i++) {
+      this.particles.push({
+        x: innerWidth / 2 + (Math.random() - 0.5) * innerWidth * 0.5,
+        y: -20 - Math.random() * innerHeight * 0.3,
+        vx: (Math.random() - 0.5) * 3,
+        vy: 2 + Math.random() * 3.5,
+        size: 6 + Math.random() * 7,
+        color: palette[i % palette.length],
+        angle: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 0.25
+      });
+    }
+    if (!this.running) { this.running = true; this.loop(ctx); }
+  },
+  loop(ctx) {
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.particles = this.particles.filter(p => p.y < this.canvas.height + 30);
+    for (const p of this.particles) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.045; p.angle += p.spin;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    }
+    if (this.particles.length) requestAnimationFrame(() => this.loop(ctx));
+    else { this.running = false; ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); }
+  }
+};
+
+/* ================= Sound (off by default) ================= */
+
+const audio = {
+  ctx: null,
+  ensure() {
+    if (!app.settings.sound) return null;
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return this.ctx;
+  },
+  tick() {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 1100;
+    gain.gain.setValueAtTime(0.035, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.045);
+  },
+  fanfare() {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    [523.25, 659.25, 783.99].forEach((freq, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.12;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.12, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.55);
+    });
+  }
+};
+
+/* ================= App state + command bus ================= */
+
+const app = {
+  store: null,
+  data: null,
+  currentClass: '',
+  settings: { ...SAMPLE_DATA.settings },
+  skipAnim: false,
+  spinning: false,
+  executedCommands: new Set()
+};
+
+const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const commandHandlers = {
+  SPIN(cmd) {
+    const idx = wheel.names.indexOf(cmd.target);
+    if (idx < 0) return;
+    app.spinning = true;
+    ui.spinBtn.disabled = true;
+    const finish = () => {
+      app.spinning = false;
+      ui.spinBtn.disabled = false;
+      reveal(cmd.target);
+    };
+    if (cmd.skipAnim || prefersReducedMotion) {
+      setRotation(finalRotationFor(idx, wheel.names.length, cmd.seed));
+      finish();
+    } else {
+      animateSpin(finalRotationFor(idx, wheel.names.length, cmd.seed), app.settings.spinSeconds * 1000, finish);
+    }
+  },
+  SWITCH_CLASS(cmd) {
+    app.currentClass = cmd.className;
+    renderStage();
+    renderRoster();
+    buildWheel(activeNames());
+  },
+  ROSTER_CHANGED() {
+    renderRoster();
+    buildWheel(activeNames());
+  },
+  RESET_ROUND() {
+    renderRoster();
+  }
+};
+
+function dispatch(cmd) {
+  if (app.executedCommands.has(cmd.id)) return;
+  app.executedCommands.add(cmd.id);
+  commandHandlers[cmd.type]?.(cmd);
+}
+
+/* ================= Selection logic (pure) ================= */
+
+function roster() { return app.data.rosters[app.currentClass] || []; }
+function calledList() { return app.data.called[app.currentClass] || []; }
+function activeNames() { return roster().filter(s => s.active).map(s => s.name); }
+function eligiblePool() { return activeNames().filter(n => !calledList().includes(n)); }
+
+function pickWinner(pool, rng) {
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+/* ================= Teacher actions ================= */
+
+async function recordCall(student, method) {
+  await app.store.logCall({ className: app.currentClass, student, method });
+  if (!calledList().includes(student)) app.data.called[app.currentClass].push(student);
+  renderRoster();
+}
+
+async function spinRandom() {
+  if (app.spinning) return;
+  const pool = eligiblePool();
+  if (pool.length === 0) return promptReset(true);
+  const seed = newSeed();
+  const winner = pickWinner(pool, mulberry32(seed));
+  await recordCall(winner, 'spin');
+  dispatch({ type: 'SPIN', id: newCommandId(), className: app.currentClass, target: winner, seed, skipAnim: app.skipAnim });
+}
+
+async function callStudent(student) {
+  if (app.spinning) return;
+  await recordCall(student, 'pick');
+  dispatch({ type: 'SPIN', id: newCommandId(), className: app.currentClass, target: student, seed: newSeed(), skipAnim: app.skipAnim });
+}
+
+async function switchClass(className) {
+  if (app.spinning) return;
+  dispatch({ type: 'SWITCH_CLASS', id: newCommandId(), className });
+}
+
+async function toggleActive(student, active) {
+  await app.store.setActive({ className: app.currentClass, student, active });
+  const row = roster().find(s => s.name === student);
+  if (row) row.active = active;
+  dispatch({ type: 'ROSTER_CHANGED', id: newCommandId(), className: app.currentClass });
+}
+
+async function resetRound() {
+  await app.store.resetRound({ className: app.currentClass });
+  app.data.called[app.currentClass] = [];
+  dispatch({ type: 'RESET_ROUND', id: newCommandId(), className: app.currentClass });
+}
+
+/* ================= Rendering ================= */
+
+const ui = {
+  landing: document.getElementById('landing'),
+  solo: document.getElementById('solo'),
+  stageClass: document.getElementById('stageClass'),
+  classSelect: document.getElementById('classSelect'),
+  rosterList: document.getElementById('rosterList'),
+  spinBtn: document.getElementById('spinBtn'),
+  reveal: document.getElementById('reveal'),
+  revealClass: document.getElementById('revealClass'),
+  revealName: document.getElementById('revealName'),
+  announcer: document.getElementById('announcer'),
+  demoBadge: document.getElementById('demoBadge'),
+  settingsDialog: document.getElementById('settingsDialog'),
+  resetDialog: document.getElementById('resetDialog'),
+  resetMessage: document.getElementById('resetMessage')
+};
+
+function renderStage() {
+  ui.stageClass.textContent = app.currentClass;
+}
+
+function renderClassSelect() {
+  ui.classSelect.replaceChildren(
+    ...app.data.classes.map(cls => {
+      const option = el('option', { value: cls }, cls);
+      option.selected = cls === app.currentClass;
+      return option;
+    })
+  );
+}
+
+function rosterRow(student, isCalled) {
+  const toggle = el('input', { type: 'checkbox', class: 'active-toggle', 'aria-label': `Active: ${student.name}` });
+  toggle.checked = student.active;
+  const row = el('li', { class: student.active ? '' : 'is-inactive', 'data-student': student.name },
+    el('span', { class: 'switch' }, toggle, el('span', { class: 'track' })),
+    el('span', { class: 'student-name' }, student.name)
+  );
+  if (isCalled) row.append(el('span', { class: 'badge-called' }, 'Called'));
+  if (student.active) {
+    row.append(el('button', { class: 'call-btn', title: `Call on ${student.name}`, 'aria-label': `Call on ${student.name}` }, '\u{1F3AF}'));
+  }
+  return row;
+}
+
+function renderRoster() {
+  const called = calledList();
+  ui.rosterList.replaceChildren(...roster().map(s => rosterRow(s, called.includes(s.name))));
+}
+
+function reveal(name) {
+  ui.revealClass.textContent = app.currentClass;
+  ui.revealName.textContent = name;
+  ui.reveal.classList.add('is-open');
+  ui.announcer.textContent = `${name} was called`;
+  if (app.settings.confetti) confetti.burst();
+  audio.fanfare();
+}
+
+function dismissReveal() {
+  ui.reveal.classList.remove('is-open');
+}
+
+function promptReset(fromEmptyPool) {
+  ui.resetMessage.textContent = fromEmptyPool
+    ? `Everyone in ${app.currentClass} has been called this round. Reset to start a new round?`
+    : `Clear the called list for ${app.currentClass} and start a new round?`;
+  ui.resetDialog.showModal();
+}
+
+/* ================= Wiring ================= */
+
+document.getElementById('enterDemo').addEventListener('click', () => enterSolo(createDemoStore()));
+
+ui.classSelect.addEventListener('change', e => switchClass(e.target.value));
+
+ui.rosterList.addEventListener('change', e => {
+  if (!e.target.classList.contains('active-toggle')) return;
+  toggleActive(e.target.closest('li').dataset.student, e.target.checked);
+});
+
+ui.rosterList.addEventListener('click', e => {
+  const btn = e.target.closest('.call-btn');
+  if (btn) callStudent(btn.closest('li').dataset.student);
+});
+
+ui.spinBtn.addEventListener('click', spinRandom);
+document.getElementById('skipAnim').addEventListener('change', e => { app.skipAnim = e.target.checked; });
+document.getElementById('resetRoundBtn').addEventListener('click', () => promptReset(false));
+
+ui.reveal.addEventListener('click', dismissReveal);
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && ui.reveal.classList.contains('is-open')) dismissReveal();
+});
+
+document.getElementById('resetCancel').addEventListener('click', () => ui.resetDialog.close());
+document.getElementById('resetConfirm').addEventListener('click', async () => {
+  ui.resetDialog.close();
+  await resetRound();
+});
+
+document.getElementById('openSettings').addEventListener('click', () => {
+  document.getElementById('setDuration').value = app.settings.spinSeconds;
+  document.getElementById('setPalette').value = app.settings.palette;
+  document.getElementById('setConfetti').checked = app.settings.confetti;
+  document.getElementById('setSound').checked = app.settings.sound;
+  ui.settingsDialog.showModal();
+});
+
+document.getElementById('settingsClose').addEventListener('click', () => ui.settingsDialog.close());
+
+for (const [id, key, read] of [
+  ['setDuration', 'spinSeconds', input => Number(input.value)],
+  ['setPalette', 'palette', input => input.value],
+  ['setConfetti', 'confetti', input => input.checked],
+  ['setSound', 'sound', input => input.checked]
+]) {
+  document.getElementById(id).addEventListener('change', async e => {
+    app.settings[key] = read(e.target);
+    await app.store.saveSettings({ [key]: app.settings[key] });
+    if (key === 'palette') buildWheel(activeNames());
+  });
+}
+
+/* ================= Boot ================= */
+
+async function enterSolo(store) {
+  app.store = store;
+  app.data = await store.getData();
+  app.settings = { ...app.settings, ...app.data.settings };
+  app.currentClass = app.data.classes[0];
+  ui.landing.classList.remove('is-active');
+  ui.solo.classList.add('is-active');
+  ui.demoBadge.classList.toggle('is-visible', store.isDemo);
+  renderStage();
+  renderClassSelect();
+  renderRoster();
+  buildWheel(activeNames());
+}
+</script>
+</body>
+</html>
