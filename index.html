@@ -221,6 +221,8 @@
     letter-spacing: 0.02em;
   }
 
+  .panel-head-actions { display: flex; gap: 0.5rem; }
+
   .icon-btn {
     background: none;
     border: 1px solid var(--ink-line);
@@ -578,7 +580,10 @@
   <div class="panel">
     <div class="panel-head">
       <h2>Teacher panel</h2>
-      <button class="icon-btn" id="openSettings">Settings</button>
+      <div class="panel-head-actions">
+        <button class="icon-btn" id="openSettings">Settings</button>
+        <button class="icon-btn" id="exitMode" title="Back to the start screen">Exit</button>
+      </div>
     </div>
 
     <label class="visually-hidden" for="classSelect">Class</label>
@@ -1208,20 +1213,13 @@ function promptReset(fromEmptyPool) {
 
 /* ================= Wiring ================= */
 
-const projectorUrl = () => `${location.href.split('?')[0]}?view=projector`;
+const baseUrl = () => location.href.split('?')[0];
+const projectorUrl = () => `${baseUrl()}?view=projector`;
 
-document.getElementById('enterDemo').addEventListener('click', () => {
-  history.replaceState(null, '', '?view=demo');
-  enterController('solo');
-});
-document.getElementById('enterTeacher').addEventListener('click', () => {
-  history.replaceState(null, '', '?view=teacher');
-  enterController('teacher');
-});
-document.getElementById('enterProjector').addEventListener('click', () => {
-  history.replaceState(null, '', '?view=projector');
-  enterProjector();
-});
+document.getElementById('enterDemo').addEventListener('click', () => { location.href = `${baseUrl()}?view=demo`; });
+document.getElementById('enterTeacher').addEventListener('click', () => { location.href = `${baseUrl()}?view=teacher`; });
+document.getElementById('enterProjector').addEventListener('click', () => { location.href = projectorUrl(); });
+document.getElementById('exitMode').addEventListener('click', () => { location.href = baseUrl(); });
 
 ui.classSelect.addEventListener('change', e => switchClass(e.target.value));
 
