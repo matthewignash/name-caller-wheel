@@ -498,6 +498,38 @@
   .dialog-field input[type="range"] { width: 150px; accent-color: var(--brass); }
   .dialog-field select { width: 150px; }
 
+  .dialog-subhead {
+    font-family: var(--display);
+    font-size: 0.95rem;
+    margin: 1.2rem 0 0.3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--ink-line);
+  }
+
+  .dialog-note {
+    font-size: 0.8rem;
+    color: var(--cream-dim);
+    margin: 0.3rem 0 0.6rem;
+  }
+
+  .dialog-label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--cream-dim);
+    margin: 0.6rem 0 0.25rem;
+  }
+
+  .dialog-input {
+    width: 100%;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--cream);
+    background: var(--ink);
+    border: 1px solid var(--ink-line);
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+  }
+
   .dialog-actions {
     display: flex;
     justify-content: flex-end;
@@ -637,8 +669,18 @@
     <label for="setSound">Sound</label>
     <span class="switch"><input type="checkbox" id="setSound"><span class="track"></span></span>
   </div>
+
+  <h3 class="dialog-subhead">Your Google Sheet</h3>
+  <p class="dialog-note">Optional. Paste the Apps Script web app URL and your secret key to load real class lists. Both stay in this browser only.</p>
+  <label class="dialog-label" for="setGasUrl">Apps Script URL</label>
+  <input type="url" id="setGasUrl" class="dialog-input" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false">
+  <label class="dialog-label" for="setGasKey">Secret key</label>
+  <input type="password" id="setGasKey" class="dialog-input" autocomplete="off">
+  <p class="dialog-note" id="gasStatus"></p>
+
   <div class="dialog-actions">
     <button class="btn" id="settingsClose">Close</button>
+    <button class="btn is-primary" id="saveGas">Save &amp; reconnect</button>
   </div>
 </dialog>
 
@@ -672,7 +714,7 @@ const SAMPLE_DATA = {
       'William R.', 'Ernest R.', 'Glenn S.', 'Frederick S.', 'Harold U.', 'Alessandro V.'
     ]
   },
-  settings: { spinSeconds: 5, palette: 'carnival', confetti: true, sound: false }
+  settings: { spinSeconds: 5, palette: 'carnival', confetti: true, sound: false, pollSeconds: 2 }
 };
 
 const PALETTES = {
@@ -716,6 +758,65 @@ function createDemoStore() {
       Object.assign(settings, patch);
     }
   };
+}
+
+/* ================= Google Sheet backend (Apps Script) =================
+   The URL and key live only in this browser's localStorage. Unconfigured
+   or unreachable, the app falls back to the demo store — never an error page. */
+
+const gasConfig = {
+  get url() { return localStorage.getItem('ncw.gasUrl') || ''; },
+  get key() { return localStorage.getItem('ncw.gasKey') || ''; },
+  get configured() { return Boolean(this.url && this.key); },
+  save(url, key) {
+    localStorage.setItem('ncw.gasUrl', url);
+    localStorage.setItem('ncw.gasKey', key);
+  }
+};
+
+function createGasStore() {
+  const url = gasConfig.url, key = gasConfig.key;
+  async function request(action, payload = {}) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, key, ...payload })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  }
+  return {
+    isDemo: false,
+    getData: () => request('getData'),
+    logCall: p => request('logCall', p),
+    setActive: p => request('setActive', p),
+    resetRound: p => request('resetRound', p),
+    saveSettings: patch => request('saveSettings', { settings: patch }),
+    setState: (stateKey, value) => request('setState', { stateKey, value }),
+    getState: stateKey => request('getState', { stateKey })
+  };
+}
+
+async function connectStore() {
+  if (!gasConfig.configured) return { store: createDemoStore(), demoReason: 'unconfigured' };
+  try {
+    const store = createGasStore();
+    const data = await store.getData();
+    return { store, data };
+  } catch {
+    return { store: createDemoStore(), demoReason: 'unreachable' };
+  }
+}
+
+function backendWrite(promise) {
+  Promise.resolve(promise).catch(() => {
+    showBadge('Connection to your Sheet was lost — recent changes may not be saved.');
+  });
+}
+
+function pushCommand(cmd) {
+  if (app.store && !app.store.isDemo) backendWrite(app.store.setState('command', JSON.stringify(cmd)));
 }
 
 /* ================= Deterministic randomness ================= */
@@ -981,7 +1082,7 @@ const isController = () => app.mode === 'solo' || app.mode === 'teacher';
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('name-caller-wheel') : null;
 
 function broadcast(msg) {
-  channel?.postMessage(msg);
+  try { channel?.postMessage(msg); } catch {}
 }
 
 channel?.addEventListener('message', e => {
@@ -1004,6 +1105,7 @@ function syncCommand() {
 
 function dispatch(cmd) {
   broadcast(cmd);
+  pushCommand(cmd);
   executeCommand(cmd);
 }
 
@@ -1068,8 +1170,8 @@ function pickWinner(pool, rng) {
 
 /* ================= Teacher actions ================= */
 
-async function recordCall(student, method) {
-  await app.store.logCall({ className: app.currentClass, student, method });
+function recordCall(student, method) {
+  backendWrite(app.store.logCall({ className: app.currentClass, student, method }));
   if (!calledList().includes(student)) app.data.called[app.currentClass].push(student);
   renderRoster();
   setLastCall(student, method);
@@ -1093,21 +1195,21 @@ function startSpinCooldown(cmd) {
   setTimeout(() => { ui.spinBtn.disabled = false; }, cmd.durationMs + 300);
 }
 
-async function spinRandom() {
+function spinRandom() {
   if (ui.spinBtn.disabled) return;
   const pool = eligiblePool();
   if (pool.length === 0) return promptReset(true);
   const seed = newSeed();
   const winner = pickWinner(pool, mulberry32(seed));
-  await recordCall(winner, 'spin');
+  recordCall(winner, 'spin');
   const cmd = spinCommand(winner, seed);
   startSpinCooldown(cmd);
   dispatch(cmd);
 }
 
-async function callStudent(student) {
+function callStudent(student) {
   if (ui.spinBtn.disabled) return;
-  await recordCall(student, 'pick');
+  recordCall(student, 'pick');
   const cmd = spinCommand(student, newSeed());
   startSpinCooldown(cmd);
   dispatch(cmd);
@@ -1116,18 +1218,19 @@ async function callStudent(student) {
 function switchClass(className) {
   if (app.spinning) return;
   app.currentClass = className;
+  if (!app.store.isDemo) backendWrite(app.store.setState('currentClass', className));
   dispatch({ type: 'SWITCH_CLASS', id: newCommandId(), ...snapshot() });
 }
 
-async function toggleActive(student, active) {
-  await app.store.setActive({ className: app.currentClass, student, active });
+function toggleActive(student, active) {
+  backendWrite(app.store.setActive({ className: app.currentClass, student, active }));
   const row = roster().find(s => s.name === student);
   if (row) row.active = active;
   dispatch({ type: 'ROSTER_CHANGED', id: newCommandId(), ...snapshot() });
 }
 
-async function resetRound() {
-  await app.store.resetRound({ className: app.currentClass });
+function resetRound() {
+  backendWrite(app.store.resetRound({ className: app.currentClass }));
   app.data.called[app.currentClass] = [];
   dispatch({ type: 'RESET_ROUND', id: newCommandId(), className: app.currentClass });
 }
@@ -1257,15 +1360,32 @@ document.getElementById('resetConfirm').addEventListener('click', async () => {
   await resetRound();
 });
 
+function backendStatusText() {
+  if (!gasConfig.configured) return 'Not connected — using sample data.';
+  if (app.store?.isDemo) return 'Saved, but your Sheet could not be reached — using sample data.';
+  return 'Connected to your Sheet.';
+}
+
 document.getElementById('openSettings').addEventListener('click', () => {
   document.getElementById('setDuration').value = app.settings.spinSeconds;
   document.getElementById('setPalette').value = app.settings.palette;
   document.getElementById('setConfetti').checked = app.settings.confetti;
   document.getElementById('setSound').checked = app.settings.sound;
+  document.getElementById('setGasUrl').value = gasConfig.url;
+  document.getElementById('setGasKey').value = gasConfig.key;
+  document.getElementById('gasStatus').textContent = backendStatusText();
   ui.settingsDialog.showModal();
 });
 
 document.getElementById('settingsClose').addEventListener('click', () => ui.settingsDialog.close());
+
+document.getElementById('saveGas').addEventListener('click', () => {
+  gasConfig.save(
+    document.getElementById('setGasUrl').value.trim(),
+    document.getElementById('setGasKey').value.trim()
+  );
+  location.reload();
+});
 
 for (const [id, key, read] of [
   ['setDuration', 'spinSeconds', input => Number(input.value)],
@@ -1273,25 +1393,42 @@ for (const [id, key, read] of [
   ['setConfetti', 'confetti', input => input.checked],
   ['setSound', 'sound', input => input.checked]
 ]) {
-  document.getElementById(id).addEventListener('change', async e => {
+  document.getElementById(id).addEventListener('change', e => {
     app.settings[key] = read(e.target);
-    await app.store.saveSettings({ [key]: app.settings[key] });
+    backendWrite(app.store.saveSettings({ [key]: app.settings[key] }));
     dispatch(syncCommand());
   });
 }
 
 /* ================= Boot ================= */
 
-async function enterController(mode) {
-  app.mode = mode;
-  app.store = createDemoStore();
-  app.data = await app.store.getData();
-  app.settings = { ...app.settings, ...app.data.settings };
-  app.currentClass = app.data.classes[0];
-  document.body.classList.toggle('mode-teacher', mode === 'teacher');
+function showBadge(text) {
+  ui.demoBadge.textContent = text;
+  ui.demoBadge.classList.add('is-visible');
+}
+
+function applyDemoBadge(demoReason) {
+  if (!demoReason) ui.demoBadge.classList.remove('is-visible');
+  else if (demoReason === 'unreachable') showBadge('Demo data — your Sheet could not be reached. Check Settings.');
+  else showBadge('Sample data. Connect your own Sheet in Settings.');
+}
+
+function showView() {
   ui.landing.classList.remove('is-active');
   ui.main.classList.add('is-active');
-  ui.demoBadge.classList.toggle('is-visible', app.store.isDemo);
+}
+
+async function enterController(mode) {
+  app.mode = mode;
+  const { store, data, demoReason } = await connectStore();
+  app.store = store;
+  app.data = data || await store.getData();
+  app.settings = { ...app.settings, ...app.data.settings };
+  const remembered = app.data.state?.currentClass;
+  app.currentClass = (remembered && app.data.rosters[remembered]) ? remembered : (app.data.classes[0] || '');
+  document.body.classList.toggle('mode-teacher', mode === 'teacher');
+  showView();
+  applyDemoBadge(store.isDemo ? demoReason || 'unconfigured' : null);
   ui.projectorUrl.value = projectorUrl();
   ui.stageClass.textContent = app.currentClass;
   renderClassSelect();
@@ -1300,16 +1437,52 @@ async function enterController(mode) {
   broadcast(syncCommand());
 }
 
-function enterProjector() {
+async function enterProjector() {
   app.mode = 'projector';
   document.body.classList.add('mode-projector');
-  ui.landing.classList.remove('is-active');
-  ui.main.classList.add('is-active');
-  ui.demoBadge.classList.add('is-visible');
-  const firstClass = Object.keys(SAMPLE_DATA.classes)[0];
-  ui.stageClass.textContent = firstClass;
-  buildWheel(SAMPLE_DATA.classes[firstClass]);
+  showView();
+  const { store, data, demoReason } = await connectStore();
+  app.store = store;
+  applyDemoBadge(store.isDemo ? demoReason || 'unconfigured' : null);
+  if (data) {
+    app.settings = { ...app.settings, ...data.settings };
+    const remembered = data.state?.currentClass;
+    const className = (remembered && data.rosters[remembered]) ? remembered : (data.classes[0] || '');
+    ui.stageClass.textContent = className;
+    buildWheel((data.rosters[className] || []).filter(s => s.active).map(s => s.name));
+    startCommandPolling(store);
+  } else {
+    const firstClass = Object.keys(SAMPLE_DATA.classes)[0];
+    ui.stageClass.textContent = firstClass;
+    buildWheel(SAMPLE_DATA.classes[firstClass]);
+  }
   broadcast({ type: 'REQUEST_SYNC' });
+}
+
+/* The polling channel: how the projector hears a teacher on another device.
+   ~2 s reads of the State tab's command key, paused while the tab is hidden.
+   The first successful read is a baseline — a command already sitting in the
+   Sheet from earlier is marked executed, not replayed. */
+
+function startCommandPolling(store) {
+  let baselined = false;
+
+  async function poll() {
+    if (document.hidden) return;
+    try {
+      const { value } = await store.getState('command');
+      if (value) {
+        const cmd = JSON.parse(value);
+        if (baselined) executeCommand(cmd);
+        else app.executedCommands.add(cmd.id);
+      }
+      baselined = true;
+    } catch {}
+  }
+
+  poll();
+  setInterval(poll, (app.settings.pollSeconds || 2) * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 }
 
 const requestedView = new URLSearchParams(location.search).get('view');
