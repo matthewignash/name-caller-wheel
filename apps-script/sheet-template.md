@@ -46,6 +46,7 @@ ever look stuck — the app rebuilds it.
 | ----------- | -------- |
 | spinSeconds | 5        |
 | palette     | carnival |
+| pickerStyle | wheel    |
 | confetti    | TRUE     |
 | sound       | FALSE    |
 | pollSeconds | 2        |

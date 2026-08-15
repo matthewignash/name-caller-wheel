@@ -187,6 +187,7 @@ function readSettings() {
   return {
     spinSeconds: Number(raw.spinSeconds) || 5,
     palette: String(raw.palette || 'carnival'),
+    pickerStyle: String(raw.pickerStyle || 'wheel'),
     confetti: raw.confetti === undefined ? true : isTrue(raw.confetti),
     sound: isTrue(raw.sound),
     pollSeconds: Number(raw.pollSeconds) || 2

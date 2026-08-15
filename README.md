@@ -9,6 +9,7 @@ A wheel-of-fortune name picker for the classroom: the wheel spins on the project
 ## What it does
 
 - **Spin a wheel of student names** with a satisfying animation, a big reveal, and confetti. Or skip the animation when the lesson needs pace.
+- **Pick your prop.** The classic wheel, or a Price-Is-Right big wheel with pegs and a flapper that ticks past every seam. Choose it in Settings; the projector follows. Novelty is the point — the same ritual four hundred times is no ritual at all.
 - **Two screens, one brain.** The projector view is just the wheel — no buttons, no roster, nothing for wandering eyes. The teacher view runs on your phone or laptop and drives everything: spin, switch class, toggle students in or out, reset the round.
 - **Everyone before anyone repeats.** Students who have been called drop out of the pool until you reset the round. Absent today? One toggle removes them from the wheel.
 - **Call on exactly who you need.** A discreet button beside each name runs the identical spin animation, landing on that student. On the projector it is indistinguishable from a random pick — but your log records the difference.
@@ -39,7 +40,7 @@ GitHub Pages (public)          Google's servers (private, yours)
 
 Two design choices do the heavy lifting:
 
-1. **The winner is chosen before the wheel moves.** The teacher device picks the outcome, then broadcasts a command — `land on this name, spin exactly this way`. Every screen renders the identical animation, and "skip animation" is just the same result without the wait.
+1. **The winner is chosen before anything moves.** The teacher device picks the outcome, then broadcasts a command — `land on this name, using this seed, over this long`. Every screen replays the identical animation from that seed, whichever prop is on screen, and "skip animation" is just the same result without the wait.
 2. **The projector is a pure renderer.** It executes commands and decides nothing. Same browser? Commands arrive instantly over a BroadcastChannel. Teacher on your phone? They travel through the Sheet, which the projector checks every couple of seconds.
 
 ## Set up your own (about 15 minutes)
@@ -97,6 +98,7 @@ The URL and key are saved per browser, so repeat step 5 once on each device you 
 
 - **"Demo data — your Sheet could not be reached."** The URL or key is wrong, or the deployment changed. Re-check Settings; make sure the URL ends in `/exec` and the key matches the script property exactly.
 - **Changed Code.gs and nothing happened?** Apps Script serves the deployed version, not the saved one. Deploy → Manage deployments → edit → new version.
+- **Picker style resets to the wheel on every reload?** Your deployed `Code.gs` predates the setting, so it drops `pickerStyle` when the app reads your Sheet back. Re-paste [`apps-script/Code.gs`](apps-script/Code.gs) and deploy a new version. The choice works fine within a session either way — it just will not stick.
 - **Roster edits in the Sheet not showing?** The app loads rosters when a view opens. Reload the page after editing the Sheet directly.
 - **Projector not reacting to your phone?** It checks the Sheet every ~2 seconds and pauses while its tab is hidden. Make sure the projector tab is actually visible, and that both devices carry the URL + key.
 

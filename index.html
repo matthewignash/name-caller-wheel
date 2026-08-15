@@ -146,7 +146,7 @@
 
   body.mode-projector .panel { display: none; }
 
-  body.mode-projector .wheel-wrap { width: min(86vh, 94vw); }
+  body.mode-projector .picker-stage { width: min(86vh, 94vw); }
 
   body.mode-projector .stage-class {
     position: fixed;
@@ -154,7 +154,7 @@
     left: 1.3rem;
   }
 
-  /* ---------- Wheel stage ---------- */
+  /* ---------- Picker stage ---------- */
 
   .stage {
     position: relative;
@@ -173,15 +173,19 @@
     color: var(--cream-dim);
   }
 
-  .wheel-wrap {
+  .picker-stage {
     position: relative;
     width: min(92vw, 640px);
     aspect-ratio: 1;
   }
 
+  .picker { position: absolute; inset: 0; display: none; }
+
+  .picker.is-active { display: block; }
+
   .wheel-svg { width: 100%; height: 100%; display: block; }
 
-  #wheelGroup { will-change: transform; }
+  .spin-group { will-change: transform; }
 
   .pointer {
     position: absolute;
@@ -192,6 +196,26 @@
     height: 52px;
     z-index: 2;
     filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+  }
+
+  /* The big wheel earns its look from staging, not new geometry: a floor-level
+     tilt, pegs on every seam, and a flapper that ticks past each one. */
+
+  [data-picker="bigwheel"] .wheel-svg {
+    transform: perspective(1600px) rotateX(14deg);
+    filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+  }
+
+  .flapper {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    translate: -50% 0;
+    width: 9%;
+    aspect-ratio: 60 / 132;
+    z-index: 2;
+    transform-origin: 50% 8%;
+    filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.6));
   }
 
   /* ---------- Control panel ---------- */
@@ -596,16 +620,34 @@
 <section id="main" class="view" aria-label="Name caller wheel">
   <div class="stage">
     <div class="stage-class" id="stageClass"></div>
-    <div class="wheel-wrap">
-      <svg class="pointer" viewBox="0 0 46 52" aria-hidden="true">
-        <path d="M23 50 L4 10 Q23 -6 42 10 Z" fill="#e8b34b" stroke="#8a6420" stroke-width="2"/>
-        <circle cx="23" cy="14" r="5" fill="#241a05"/>
-      </svg>
-      <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Spinning wheel of student names">
-        <g id="wheelGroup"></g>
-        <circle cx="500" cy="500" r="484" fill="none" stroke="#e8b34b" stroke-width="10"/>
-        <circle cx="500" cy="500" r="58" fill="#17202f" stroke="#e8b34b" stroke-width="6"/>
-      </svg>
+    <div class="picker-stage" id="pickerStage">
+      <div class="picker" data-picker="wheel">
+        <svg class="pointer" viewBox="0 0 46 52" aria-hidden="true">
+          <path d="M23 50 L4 10 Q23 -6 42 10 Z" fill="#e8b34b" stroke="#8a6420" stroke-width="2"/>
+          <circle cx="23" cy="14" r="5" fill="#241a05"/>
+        </svg>
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Spinning wheel of student names">
+          <g class="spin-group" id="wheelGroup"></g>
+          <circle cx="500" cy="500" r="484" fill="none" stroke="#e8b34b" stroke-width="10"/>
+          <circle cx="500" cy="500" r="58" fill="#17202f" stroke="#e8b34b" stroke-width="6"/>
+        </svg>
+      </div>
+
+      <div class="picker" data-picker="bigwheel">
+        <svg class="flapper" id="flapper" viewBox="0 0 60 132" aria-hidden="true">
+          <rect x="18" y="0" width="24" height="20" rx="6" fill="#8a6420" stroke="#5e430f" stroke-width="2"/>
+          <circle cx="30" cy="10" r="4" fill="#241a05"/>
+          <path d="M17 16 L43 16 L36 112 Q30 126 24 112 Z" fill="#f6f1e5" stroke="#8a6420" stroke-width="3"/>
+          <path d="M24 30 L36 30" stroke="#d8cdb6" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Big wheel of student names">
+          <circle cx="500" cy="500" r="496" fill="#17202f"/>
+          <g class="spin-group" id="bigWheelGroup"></g>
+          <circle cx="500" cy="500" r="484" fill="none" stroke="#c9ced6" stroke-width="16"/>
+          <circle cx="500" cy="500" r="96" fill="#1d2738" stroke="#c9ced6" stroke-width="10"/>
+          <circle cx="500" cy="500" r="26" fill="#e8b34b"/>
+        </svg>
+      </div>
     </div>
   </div>
 
@@ -653,6 +695,13 @@
   <div class="dialog-field">
     <label for="setDuration">Spin length</label>
     <input type="range" id="setDuration" min="3" max="8" step="1">
+  </div>
+  <div class="dialog-field">
+    <label for="setPicker">Picker style</label>
+    <select id="setPicker">
+      <option value="wheel">Classic wheel</option>
+      <option value="bigwheel">Big wheel</option>
+    </select>
   </div>
   <div class="dialog-field">
     <label for="setPalette">Wheel colors</label>
@@ -715,7 +764,7 @@ const SAMPLE_DATA = {
       'William R.', 'Ernest R.', 'Glenn S.', 'Frederick S.', 'Harold U.', 'Alessandro V.'
     ]
   },
-  settings: { spinSeconds: 5, palette: 'carnival', confetti: true, sound: false, pollSeconds: 2 }
+  settings: { spinSeconds: 5, palette: 'carnival', pickerStyle: 'wheel', confetti: true, sound: false, pollSeconds: 2 }
 };
 
 const PALETTES = {
@@ -854,14 +903,16 @@ function svgEl(tag, attrs = {}, text) {
   return node;
 }
 
-/* ================= Wheel geometry + animation ================= */
+/* ================= Picker stage ================= */
 
-const wheel = {
-  names: [],
-  rotation: 0,
-  animToken: 0,
-  group: document.getElementById('wheelGroup')
-};
+/* Every picker answers the question the SPIN command asks: reach this name,
+   deterministically from this seed, in this long — then call done() once.
+   All randomness comes from mulberry32(cmd.seed), which is what keeps the
+   teacher's window and the projector rendering the identical animation. */
+
+const stage = { names: [], styleKey: null, paletteKey: null, animToken: 0 };
+
+const stageEl = document.getElementById('pickerStage');
 
 const CX = 500, CY = 500, R = 478;
 
@@ -897,17 +948,31 @@ function labelFontSize(count, names) {
   return Math.max(13, Math.min(40, byArc, byWidth));
 }
 
-function buildWheel(names) {
-  wheel.names = names;
-  wheel.group.replaceChildren();
-  if (names.length === 0) {
-    wheel.group.append(
-      svgEl('circle', { cx: CX, cy: CY, r: R, fill: '#17202f' }),
-      svgEl('text', { x: CX, y: CY, fill: '#f6f1e5', 'font-size': 34, 'text-anchor': 'middle' }, 'No active students')
-    );
-    return;
-  }
-  wheel.paletteKey = app.settings.palette;
+function emptyDisc(group) {
+  group.replaceChildren(
+    svgEl('circle', { cx: CX, cy: CY, r: R, fill: '#17202f' }),
+    svgEl('text', { x: CX, y: CY, fill: '#f6f1e5', 'font-size': 34, 'text-anchor': 'middle' }, 'No active students')
+  );
+}
+
+function wedgeLabel({ name, mid, color, fontSize, radius }) {
+  const anchor = polar(R * radius, mid);
+  return svgEl('text', {
+    x: anchor.x.toFixed(2),
+    y: anchor.y.toFixed(2),
+    transform: `rotate(${mid.toFixed(2)} ${anchor.x.toFixed(2)} ${anchor.y.toFixed(2)})`,
+    fill: textColorFor(color),
+    'font-size': fontSize.toFixed(1),
+    'font-family': 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif',
+    'font-weight': 700,
+    'text-anchor': 'end',
+    'dominant-baseline': 'middle'
+  }, name);
+}
+
+function fillWedges(group, names, labelRadius) {
+  if (names.length === 0) return emptyDisc(group);
+  group.replaceChildren();
   const palette = PALETTES[app.settings.palette] || PALETTES.carnival;
   const colors = segmentColors(names.length, palette);
   const seg = 360 / names.length;
@@ -915,67 +980,153 @@ function buildWheel(names) {
 
   names.forEach((name, i) => {
     const start = -90 + i * seg, mid = start + seg / 2;
-    wheel.group.append(names.length === 1
+    group.append(names.length === 1
       ? svgEl('circle', { cx: CX, cy: CY, r: R, fill: colors[i] })
       : svgEl('path', { d: segmentPath(start, start + seg), fill: colors[i], stroke: '#0e1420', 'stroke-width': 2 }));
-    const anchor = polar(R * 0.94, mid);
-    wheel.group.append(svgEl('text', {
-      x: anchor.x.toFixed(2),
-      y: anchor.y.toFixed(2),
-      transform: `rotate(${mid.toFixed(2)} ${anchor.x.toFixed(2)} ${anchor.y.toFixed(2)})`,
-      fill: textColorFor(colors[i]),
-      'font-size': fontSize.toFixed(1),
-      'font-family': 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif',
-      'font-weight': 700,
-      'text-anchor': 'end',
-      'dominant-baseline': 'middle'
-    }, name));
+    group.append(wedgeLabel({ name, mid, color: colors[i], fontSize, radius: labelRadius }));
   });
-  setRotation(wheel.rotation);
 }
 
-function setRotation(deg) {
-  wheel.rotation = deg;
-  wheel.group.setAttribute('transform', `rotate(${deg} ${CX} ${CY})`);
+function pegRing(count) {
+  return Array.from({ length: count }, (_, i) => {
+    const at = polar(R * 0.985, -90 + i * (360 / count));
+    return svgEl('circle', {
+      cx: at.x.toFixed(2), cy: at.y.toFixed(2), r: 11,
+      fill: '#f6f1e5', stroke: '#8a9099', 'stroke-width': 3
+    });
+  });
 }
 
-function segmentUnderPointer() {
-  const count = wheel.names.length;
+function segmentAt(rotation, count) {
   if (!count) return -1;
-  const seg = 360 / count;
-  const pointerAngle = ((-wheel.rotation % 360) + 360) % 360;
-  return Math.floor(pointerAngle / seg) % count;
+  return Math.floor((((-rotation % 360) + 360) % 360) / (360 / count)) % count;
 }
 
-function finalRotationFor(targetIndex, count, seed) {
+function finalRotationFor(targetIndex, count, seed, from) {
   const rng = mulberry32(seed);
   const seg = 360 / count;
   const within = 0.18 + 0.64 * rng();
   const landing = (360 - ((targetIndex + within) * seg) % 360) % 360;
   const turns = 4 + Math.floor(rng() * 3);
-  const base = Math.ceil(wheel.rotation / 360) * 360;
-  return base + turns * 360 + landing;
+  return Math.ceil(from / 360) * 360 + turns * 360 + landing;
 }
 
 const easeOutQuart = t => 1 - (1 - t) ** 4;
+const easeOutCubic = t => 1 - (1 - t) ** 3;
 
-function animateSpin(finalRotation, durationMs, onDone) {
-  const token = ++wheel.animToken;
-  const start = wheel.rotation;
-  const delta = finalRotation - start;
+/* One rAF loop for every style. The timebase is wall-clock, so dropped frames
+   shorten nothing, and the monotonic token means starting a spin orphans any
+   spin still running. */
+
+function animate({ durationMs, ease, frame, done }) {
+  const token = ++stage.animToken;
   const t0 = performance.now();
-  let lastSegment = segmentUnderPointer();
 
-  function frame(now) {
-    if (token !== wheel.animToken) return;
+  function step(now) {
+    if (token !== stage.animToken) return;
     const t = Math.min(1, (now - t0) / durationMs);
-    setRotation(start + delta * easeOutQuart(t));
-    const seg = segmentUnderPointer();
-    if (seg !== lastSegment) { lastSegment = seg; audio.tick(); }
-    if (t < 1) requestAnimationFrame(frame);
-    else onDone();
+    frame(ease(t), t);
+    if (t < 1) requestAnimationFrame(step);
+    else done();
   }
-  requestAnimationFrame(frame);
+  requestAnimationFrame(step);
+}
+
+/* Shared by both wheels: ease from wherever the wheel is resting to the seeded
+   landing angle, ticking once per seam crossed. `apply` is where each style paints. */
+
+function runSpin(spin, ctx, ease) {
+  const count = stage.names.length;
+  const from = spin.rotation;
+  const final = finalRotationFor(ctx.index, count, ctx.seed, from);
+  if (ctx.instant) {
+    spin.apply(final, 1);
+    return ctx.done();
+  }
+  let lastSegment = segmentAt(from, count);
+
+  animate({
+    durationMs: ctx.durationMs,
+    ease,
+    frame: (eased, t) => {
+      spin.apply(from + (final - from) * eased, t);
+      const seg = segmentAt(spin.rotation, count);
+      if (seg !== lastSegment) { lastSegment = seg; audio.tick(); }
+    },
+    done: ctx.done
+  });
+}
+
+const wheelSpin = {
+  rotation: 0,
+  group: document.getElementById('wheelGroup'),
+  apply(deg) {
+    this.rotation = deg;
+    this.group.setAttribute('transform', `rotate(${deg} ${CX} ${CY})`);
+  }
+};
+
+/* The flapper rides the seam it just passed: thrown over as a peg clears,
+   springing back before the next arrives, and calming as the wheel slows. */
+
+function flapperAngle(rotation, t) {
+  const count = stage.names.length;
+  if (!count) return 0;
+  const seg = 360 / count;
+  const sinceSeam = (((-rotation % 360) + 360) % 360 % seg) / seg;
+  return 24 * Math.max(0, 1 - sinceSeam * 3) * (1 - t);
+}
+
+const bigWheelSpin = {
+  rotation: 0,
+  group: document.getElementById('bigWheelGroup'),
+  flapper: document.getElementById('flapper'),
+  apply(deg, t) {
+    this.rotation = deg;
+    this.group.setAttribute('transform', `rotate(${deg} ${CX} ${CY})`);
+    this.flapper.style.rotate = `${flapperAngle(deg, t).toFixed(2)}deg`;
+  }
+};
+
+const PICKERS = {
+  wheel: {
+    build(names) {
+      fillWedges(wheelSpin.group, names, 0.94);
+      wheelSpin.apply(wheelSpin.rotation);
+    },
+    play(ctx) { runSpin(wheelSpin, ctx, easeOutQuart); }
+  },
+
+  bigwheel: {
+    build(names) {
+      fillWedges(bigWheelSpin.group, names, 0.88);
+      if (names.length > 1) bigWheelSpin.group.append(...pegRing(names.length));
+      bigWheelSpin.apply(bigWheelSpin.rotation, 1);
+    },
+    play(ctx) { runSpin(bigWheelSpin, ctx, easeOutCubic); }
+  }
+};
+
+function currentStyle() {
+  return PICKERS[app.settings.pickerStyle] ? app.settings.pickerStyle : 'wheel';
+}
+
+/* Deliberately does not cancel a spin in flight: the spin groups outlive a
+   rebuild, so the animation keeps painting and still reaches its reveal.
+   Cancelling here would strand app.spinning at true and wedge switchClass. */
+
+function buildStage(names) {
+  stage.names = names;
+  stage.styleKey = currentStyle();
+  stage.paletteKey = app.settings.palette;
+  for (const el of stageEl.children) el.classList.toggle('is-active', el.dataset.picker === stage.styleKey);
+  PICKERS[stage.styleKey].build(names);
+}
+
+function stageIsStale(activeNames) {
+  return !sameArray(stage.names, activeNames)
+    || stage.paletteKey !== app.settings.palette
+    || stage.styleKey !== currentStyle();
 }
 
 /* ================= Confetti ================= */
@@ -1123,20 +1274,20 @@ const rendererHandlers = {
   SPIN(cmd) {
     applySnapshot(cmd);
     dismissReveal();
-    const idx = wheel.names.indexOf(cmd.target);
-    if (idx < 0) return;
+    const index = stage.names.indexOf(cmd.target);
+    if (index < 0) return;
     app.spinning = true;
-    const finish = () => {
-      app.spinning = false;
-      reveal(cmd.target);
-    };
-    const finalRotation = finalRotationFor(idx, wheel.names.length, cmd.seed);
-    if (cmd.skipAnim || prefersReducedMotion) {
-      setRotation(finalRotation);
-      finish();
-    } else {
-      animateSpin(finalRotation, cmd.durationMs, finish);
-    }
+
+    PICKERS[stage.styleKey].play({
+      index,
+      seed: cmd.seed,
+      durationMs: cmd.durationMs,
+      instant: cmd.skipAnim || prefersReducedMotion,
+      done: () => {
+        app.spinning = false;
+        reveal(cmd.target);
+      }
+    });
   },
   SYNC: applySnapshot,
   SWITCH_CLASS: applySnapshot,
@@ -1147,9 +1298,7 @@ const rendererHandlers = {
 function applySnapshot(cmd) {
   ui.stageClass.textContent = cmd.className;
   if (cmd.settings) app.settings = { ...app.settings, ...cmd.settings };
-  if (!sameArray(wheel.names, cmd.activeNames) || wheel.paletteKey !== app.settings.palette) {
-    buildWheel(cmd.activeNames);
-  }
+  if (stageIsStale(cmd.activeNames)) buildStage(cmd.activeNames);
 }
 
 const controllerHandlers = {
@@ -1385,6 +1534,7 @@ function backendStatusText() {
 
 document.getElementById('openSettings').addEventListener('click', () => {
   document.getElementById('setDuration').value = app.settings.spinSeconds;
+  document.getElementById('setPicker').value = currentStyle();
   document.getElementById('setPalette').value = app.settings.palette;
   document.getElementById('setConfetti').checked = app.settings.confetti;
   document.getElementById('setSound').checked = app.settings.sound;
@@ -1406,6 +1556,7 @@ document.getElementById('saveGas').addEventListener('click', () => {
 
 for (const [id, key, read] of [
   ['setDuration', 'spinSeconds', input => Number(input.value)],
+  ['setPicker', 'pickerStyle', input => input.value],
   ['setPalette', 'palette', input => input.value],
   ['setConfetti', 'confetti', input => input.checked],
   ['setSound', 'sound', input => input.checked]
@@ -1450,7 +1601,7 @@ async function enterController(mode) {
   ui.stageClass.textContent = app.currentClass;
   renderClassSelect();
   renderRoster();
-  if (mode === 'solo') buildWheel(activeNames());
+  if (mode === 'solo') buildStage(activeNames());
   broadcast(syncCommand());
 }
 
@@ -1466,12 +1617,12 @@ async function enterProjector() {
     const remembered = data.state?.currentClass;
     const className = (remembered && data.rosters[remembered]) ? remembered : (data.classes[0] || '');
     ui.stageClass.textContent = className;
-    buildWheel((data.rosters[className] || []).filter(s => s.active).map(s => s.name));
+    buildStage((data.rosters[className] || []).filter(s => s.active).map(s => s.name));
     startCommandPolling(store);
   } else {
     const firstClass = Object.keys(SAMPLE_DATA.classes)[0];
     ui.stageClass.textContent = firstClass;
-    buildWheel(SAMPLE_DATA.classes[firstClass]);
+    buildStage(SAMPLE_DATA.classes[firstClass]);
   }
   broadcast({ type: 'REQUEST_SYNC' });
 }
