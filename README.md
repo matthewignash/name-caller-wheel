@@ -89,6 +89,7 @@ The URL and key are saved per browser, so repeat step 5 once on each device you 
 ### 6. Classroom setup
 
 - On the classroom computer, open the **projector link** (copy it from the bottom of the teacher panel) and bookmark it. Full-screen it with F11.
+- Running both from one machine? Click **Open** beside that link. The projector view lands in a second tab — drag it to the projector screen and F11 it — while the teacher panel stays live in the first.
 - Keep the teacher view open on your phone. Spin from anywhere in the room.
 - After class, open the Sheet's Log tab. Add your own notes in the Note column — the app never touches it.
 

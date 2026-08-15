@@ -633,6 +633,7 @@
       <div class="projector-link">
         <label class="visually-hidden" for="projectorUrl">Projector link</label>
         <input id="projectorUrl" readonly>
+        <button class="icon-btn" id="openProjectorTab" title="Open the projector view in a new tab">Open</button>
         <button class="icon-btn" id="copyProjectorUrl">Copy</button>
       </div>
     </div>
@@ -1319,9 +1320,21 @@ function promptReset(fromEmptyPool) {
 const baseUrl = () => location.href.split('?')[0];
 const projectorUrl = () => `${baseUrl()}?view=projector`;
 
+/* Named tab, so a second click focuses the projector already open instead of
+   spawning a duplicate that polls the Sheet on its own timer. Returns false
+   when a popup blocker swallowed the tab, so each caller can fall back. */
+
+function openProjectorTab() {
+  const tab = window.open(projectorUrl(), 'ncw-projector');
+  tab?.focus();
+  return !!tab;
+}
+
 document.getElementById('enterDemo').addEventListener('click', () => { location.href = `${baseUrl()}?view=demo`; });
 document.getElementById('enterTeacher').addEventListener('click', () => { location.href = `${baseUrl()}?view=teacher`; });
-document.getElementById('enterProjector').addEventListener('click', () => { location.href = projectorUrl(); });
+document.getElementById('enterProjector').addEventListener('click', () => {
+  if (!openProjectorTab()) location.href = projectorUrl();
+});
 document.getElementById('exitMode').addEventListener('click', () => { location.href = baseUrl(); });
 
 ui.classSelect.addEventListener('change', e => switchClass(e.target.value));
@@ -1339,6 +1352,10 @@ ui.rosterList.addEventListener('click', e => {
 ui.spinBtn.addEventListener('click', spinRandom);
 document.getElementById('skipAnim').addEventListener('change', e => { app.skipAnim = e.target.checked; });
 document.getElementById('resetRoundBtn').addEventListener('click', () => promptReset(false));
+
+document.getElementById('openProjectorTab').addEventListener('click', () => {
+  if (!openProjectorTab()) ui.projectorUrl.select();
+});
 
 document.getElementById('copyProjectorUrl').addEventListener('click', async () => {
   try {
