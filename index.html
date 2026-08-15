@@ -1177,7 +1177,7 @@ const nameStyle = {
    for a number nobody owns. */
 
 const DIE_SHAPES = { 4: 'tri', 6: 'cube', 8: 'diamond', 10: 'kite', 12: 'pentagon', 20: 'hexagon' };
-const POLY_SIDES = { tri: 3, diamond: 4, pentagon: 5, hexagon: 6 };
+const POLY_SIDES = { tri: 3, cube: 4, diamond: 4, pentagon: 5, hexagon: 6 };
 
 function diceConfig(count) {
   if (count > 20) return { percentile: true, shape: 'kite' };
@@ -1185,58 +1185,100 @@ function diceConfig(count) {
   return { percentile: false, sides, shape: DIE_SHAPES[sides] || 'barrel' };
 }
 
-function polygonPoints(sides, radius, cx, cy) {
+function polygonPoints(sides, radius, cx, cy, turn = 0) {
   return Array.from({ length: sides }, (_, i) => {
-    const a = (-90 + i * 360 / sides) * Math.PI / 180;
-    return `${(cx + radius * Math.cos(a)).toFixed(1)},${(cy + radius * Math.sin(a)).toFixed(1)}`;
-  }).join(' ');
+    const a = (-90 + turn + i * 360 / sides) * Math.PI / 180;
+    return [cx + radius * Math.cos(a), cy + radius * Math.sin(a)];
+  });
 }
 
-function dieBody(shape, cx, r) {
-  const skin = { fill: '#f6f1e5', stroke: '#8a6420', 'stroke-width': 9, 'stroke-linejoin': 'round' };
-  if (POLY_SIDES[shape]) return svgEl('polygon', { points: polygonPoints(POLY_SIDES[shape], r, cx, CY), ...skin });
+function dieOutline(shape, cx, r) {
   if (shape === 'kite') {
-    return svgEl('polygon', {
-      points: `${cx},${CY - r} ${cx + r * 0.86},${CY - r * 0.12} ${cx + r * 0.34},${CY + r * 0.72} ${cx},${CY + r} ${cx - r * 0.34},${CY + r * 0.72} ${cx - r * 0.86},${CY - r * 0.12}`,
-      ...skin
-    });
+    return [[cx, CY - r], [cx + r * 0.86, CY - r * 0.12], [cx + r * 0.34, CY + r * 0.72],
+      [cx, CY + r], [cx - r * 0.34, CY + r * 0.72], [cx - r * 0.86, CY - r * 0.12]];
   }
-  const w = r * (shape === 'barrel' ? 2 : 1.62), h = r * 1.5;
-  return svgEl('rect', { x: cx - w / 2, y: CY - h / 2, width: w, height: h, rx: shape === 'barrel' ? h / 2 : r * 0.2, ...skin });
+  if (shape === 'barrel') return polygonPoints(8, r, cx, CY, 22.5);
+  return polygonPoints(POLY_SIDES[shape], r, cx, CY, shape === 'cube' ? 45 : 0);
 }
 
-const dice = { group: document.getElementById('diceGroup'), labels: [], config: null };
+/* A real die reads as a solid because of its facets: a ring of angled planes
+   catching the light around the one flat face that carries the result. Same
+   construction for every shape — only the outline changes. */
+
+const FACET_SHADES = ['#e9dfc6', '#d3c5a4', '#f2ead8', '#dccfb2'];
+
+function facetedDie(shape, cx, r) {
+  const outer = dieOutline(shape, cx, r);
+  const inner = outer.map(([x, y]) => [cx + (x - cx) * 0.54, CY + (y - CY) * 0.54]);
+  const path = pts => pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const edge = { stroke: '#9a7638', 'stroke-width': 4, 'stroke-linejoin': 'round' };
+
+  const parts = outer.map((_, i) => {
+    const j = (i + 1) % outer.length;
+    return svgEl('polygon', { points: path([outer[i], outer[j], inner[j], inner[i]]), fill: FACET_SHADES[i % FACET_SHADES.length], ...edge });
+  });
+  parts.push(svgEl('polygon', { points: path(inner), fill: '#fffdf5', ...edge }));
+  parts.unshift(svgEl('polygon', { points: path(outer), fill: '#c9bda3', stroke: '#7d5f2c', 'stroke-width': 12, 'stroke-linejoin': 'round' }));
+  return parts;
+}
+
+const dice = { group: document.getElementById('diceGroup'), dies: [], config: null };
 
 function setDiceFaces(parts) {
-  const width = dice.config.percentile ? 220 : 470;
-  dice.labels.forEach((el, i) => {
-    el.textContent = parts[i];
-    el.setAttribute('font-size', fitFontSize(parts[i], width, 150).toFixed(1));
+  const width = dice.config.percentile ? 200 : 400;
+  dice.dies.forEach((die, i) => {
+    die.label.textContent = parts[i];
+    die.label.setAttribute('font-size', fitFontSize(parts[i], width, 120).toFixed(1));
   });
 }
 
 function buildDice(names) {
-  dice.labels = [];
+  dice.dies = [];
   if (!names.length) return stageMessage(dice.group);
   dice.group.replaceChildren();
   dice.config = diceConfig(names.length);
   const spots = dice.config.percentile ? [320, 680] : [CX];
-  const radius = dice.config.percentile ? 195 : 290;
+  const r = dice.config.percentile ? 195 : 285;
 
-  for (const cx of spots) {
-    dice.group.append(dieBody(dice.config.shape, cx, radius));
-    const label = svgEl('text', { x: cx, y: CY, fill: '#241a05', ...nameStyle });
-    dice.group.append(label);
-    dice.labels.push(label);
-  }
-  dice.group.removeAttribute('transform');
+  /* A die never lands perfectly square-on, and neither should this one. */
+  const tilts = dice.config.percentile ? [-7, 6] : [-5];
+
+  spots.forEach((cx, i) => {
+    const shadow = svgEl('ellipse', { cx, cy: CY + r + 55, rx: r * 0.86, ry: r * 0.16, fill: '#04060a', opacity: 0.42 });
+    const body = svgEl('g', {});
+    const label = svgEl('text', { x: cx, y: CY + 6, fill: '#241a05', ...nameStyle });
+    body.append(...facetedDie(dice.config.shape, cx, r), label);
+    dice.group.append(shadow, body);
+    dice.dies.push({ body, label, shadow, cx, r, tilt: tilts[i] });
+    restDie(dice.dies[i]);
+  });
   setDiceFaces(dice.config.percentile ? ['d10', 'd10'] : [`d${dice.config.sides}`]);
 }
 
-function diceTransform(eased, t) {
+/* The tumble sells the solid: it arcs in bouncing, spins, and squashes its
+   width as if turning end over end, while the shadow tightens under it. */
+
+function tumbleDie(die, eased, t) {
   const away = 1 - eased;
-  const bounce = Math.abs(Math.sin(Math.PI * 2.6 * t)) * 150 * (1 - t);
-  return `translate(${(-430 * away).toFixed(1)} ${(-540 * away - bounce).toFixed(1)}) rotate(${(-960 * away).toFixed(1)} ${CX} ${CY})`;
+  const hop = Math.abs(Math.sin(Math.PI * 2.6 * t)) * away;
+  const dx = -430 * away, dy = -520 * away - hop * 190;
+  const turn = Math.max(0.24, Math.abs(Math.cos(eased * Math.PI * 5)));
+  const land = t > 0.86 ? 1 - 0.14 * Math.sin((t - 0.86) / 0.14 * Math.PI) : 1;
+
+  die.body.setAttribute('transform', diePose(die, dx, dy, die.tilt - 900 * away, turn, land));
+  die.shadow.setAttribute('rx', (die.r * 0.86 * (1 - hop * 0.45)).toFixed(1));
+  die.shadow.setAttribute('opacity', (0.42 * (1 - hop * 0.55)).toFixed(2));
+}
+
+function diePose(die, dx, dy, rot, sx, sy) {
+  return `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) translate(${die.cx} ${CY}) `
+    + `rotate(${rot.toFixed(1)}) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(${-die.cx} ${-CY})`;
+}
+
+function restDie(die) {
+  die.body.setAttribute('transform', diePose(die, 0, 0, die.tilt, 1, 1));
+  die.shadow.setAttribute('rx', (die.r * 0.86).toFixed(1));
+  die.shadow.setAttribute('opacity', 0.42);
 }
 
 function diceFaces(ctx, rng) {
@@ -1249,19 +1291,22 @@ function diceFaces(ctx, rng) {
 
 function playDice(ctx) {
   const { final, flick } = diceFaces(ctx, mulberry32(ctx.seed));
-  if (ctx.instant) {
-    dice.group.removeAttribute('transform');
+  const settle = () => {
+    dice.dies.forEach(restDie);
     setDiceFaces(final);
+  };
+  if (ctx.instant) {
+    settle();
     return ctx.done();
   }
-  const flicks = Array.from({ length: 16 }, flick);
+  const flicks = Array.from({ length: 18 }, flick);
   let shown = -1;
 
   animate({
     durationMs: ctx.durationMs,
     ease: easeOutCubic,
     frame: (eased, t) => {
-      dice.group.setAttribute('transform', diceTransform(eased, t));
+      for (const die of dice.dies) tumbleDie(die, eased, t);
       const i = Math.min(flicks.length - 1, Math.floor(eased * flicks.length));
       if (i === shown) return;
       shown = i;
@@ -1269,8 +1314,7 @@ function playDice(ctx) {
       audio.tick();
     },
     done: () => {
-      dice.group.removeAttribute('transform');
-      setDiceFaces(final);
+      settle();
       ctx.done();
     }
   });
