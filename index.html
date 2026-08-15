@@ -1176,109 +1176,294 @@ const nameStyle = {
    computed backwards from the winner, which is why it never has to re-roll
    for a number nobody owns. */
 
-const DIE_SHAPES = { 4: 'tri', 6: 'cube', 8: 'diamond', 10: 'kite', 12: 'pentagon', 20: 'hexagon' };
-const POLY_SIDES = { tri: 3, cube: 4, diamond: 4, pentagon: 5, hexagon: 6 };
-
 function diceConfig(count) {
-  if (count > 20) return { percentile: true, shape: 'kite' };
-  const sides = Math.max(4, count);
-  return { percentile: false, sides, shape: DIE_SHAPES[sides] || 'barrel' };
+  if (count > 20) return { percentile: true, sides: 10 };
+  return { percentile: false, sides: Math.max(4, count) };
 }
 
-function polygonPoints(sides, radius, cx, cy, turn = 0) {
-  return Array.from({ length: sides }, (_, i) => {
-    const a = (-90 + turn + i * 360 / sides) * Math.PI / 180;
-    return [cx + radius * Math.cos(a), cy + radius * Math.sin(a)];
-  });
+/* ---------- Just enough 3D for dice ----------
+   The die is a real solid: vertices in unit space and faces as index lists.
+   Every frame it is rotated, the faces pointing away are dropped, what is
+   left is painted back to front, and each face is shaded by how squarely it
+   turns toward the light. That is what makes it read as an object you could
+   pick up rather than a picture of one. */
+
+const v3 = {
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  len: a => Math.hypot(a[0], a[1], a[2]),
+  norm(a) { const l = this.len(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+};
+
+const centroid = pts => pts
+  .reduce((s, p) => [s[0] + p[0], s[1] + p[1], s[2] + p[2]], [0, 0, 0])
+  .map(c => c / pts.length);
+
+function orderFace(idx, verts) {
+  const mid = centroid(idx.map(i => verts[i]));
+  const out = v3.norm(mid);
+  const u = v3.norm(v3.sub(verts[idx[0]], mid));
+  const w = v3.cross(out, u);
+  const angle = i => Math.atan2(v3.dot(v3.sub(verts[i], mid), w), v3.dot(v3.sub(verts[i], mid), u));
+  return [...idx].sort((a, b) => angle(a) - angle(b));
 }
 
-function dieOutline(shape, cx, r) {
-  if (shape === 'kite') {
-    return [[cx, CY - r], [cx + r * 0.86, CY - r * 0.12], [cx + r * 0.34, CY + r * 0.72],
-      [cx, CY + r], [cx - r * 0.34, CY + r * 0.72], [cx - r * 0.86, CY - r * 0.12]];
+/* Regular solids have every edge the same length, so the triangular faces are
+   simply the vertex triples that are all mutually one edge apart. */
+
+function triangleFaces(verts) {
+  const d2 = (a, b) => v3.dot(v3.sub(a, b), v3.sub(a, b));
+  let shortest = Infinity;
+  verts.forEach((a, i) => verts.slice(i + 1).forEach(b => { shortest = Math.min(shortest, d2(a, b)); }));
+  const near = (i, j) => d2(verts[i], verts[j]) < shortest * 1.15;
+  const faces = [];
+  for (let i = 0; i < verts.length; i++) {
+    for (let j = i + 1; j < verts.length; j++) {
+      for (let k = j + 1; k < verts.length; k++) {
+        if (near(i, j) && near(j, k) && near(i, k)) faces.push([i, j, k]);
+      }
+    }
   }
-  if (shape === 'barrel') return polygonPoints(8, r, cx, CY, 22.5);
-  return polygonPoints(POLY_SIDES[shape], r, cx, CY, shape === 'cube' ? 45 : 0);
+  return faces;
 }
 
-/* A real die reads as a solid because of its facets: a ring of angled planes
-   catching the light around the one flat face that carries the result. Same
-   construction for every shape — only the outline changes. */
+/* Turn face 0 to the camera at build time, so the die rests showing a face
+   square-on and the name sits flat on it. */
 
-const FACET_SHADES = ['#e9dfc6', '#d3c5a4', '#f2ead8', '#dccfb2'];
-
-function facetedDie(shape, cx, r) {
-  const outer = dieOutline(shape, cx, r);
-  const inner = outer.map(([x, y]) => [cx + (x - cx) * 0.54, CY + (y - CY) * 0.54]);
-  const path = pts => pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  const edge = { stroke: '#9a7638', 'stroke-width': 4, 'stroke-linejoin': 'round' };
-
-  const parts = outer.map((_, i) => {
-    const j = (i + 1) % outer.length;
-    return svgEl('polygon', { points: path([outer[i], outer[j], inner[j], inner[i]]), fill: FACET_SHADES[i % FACET_SHADES.length], ...edge });
+function faceCamera(verts, faces) {
+  const n = v3.norm(centroid(faces[0].map(i => verts[i])));
+  const axis = v3.cross(n, [0, 0, 1]);
+  if (v3.len(axis) < 1e-6) return verts;
+  const k = v3.norm(axis), sin = v3.len(axis), cos = v3.dot(n, [0, 0, 1]);
+  return verts.map(p => {
+    const kxp = v3.cross(k, p), kdp = v3.dot(k, p) * (1 - cos);
+    return [0, 1, 2].map(i => p[i] * cos + kxp[i] * sin + k[i] * kdp);
   });
-  parts.push(svgEl('polygon', { points: path(inner), fill: '#fffdf5', ...edge }));
-  parts.unshift(svgEl('polygon', { points: path(outer), fill: '#c9bda3', stroke: '#7d5f2c', 'stroke-width': 12, 'stroke-linejoin': 'round' }));
-  return parts;
+}
+
+function solid(rawVerts, rawFaces) {
+  const scale = Math.max(...rawVerts.map(v => v3.len(v)));
+  const scaled = rawVerts.map(p => p.map(c => c / scale));
+  const faces = rawFaces.map(f => orderFace(f, scaled));
+  return { verts: faceCamera(scaled, faces), faces };
+}
+
+function icosahedron() {
+  const phi = (1 + Math.sqrt(5)) / 2, verts = [];
+  for (const a of [1, -1]) {
+    for (const b of [1, -1]) verts.push([0, a, b * phi], [a, b * phi, 0], [b * phi, 0, a]);
+  }
+  return solid(verts, triangleFaces(verts));
+}
+
+function dodecahedron() {
+  const ico = icosahedron();
+  const verts = ico.faces.map(f => v3.norm(centroid(f.map(i => ico.verts[i]))));
+  const faces = ico.verts.map((_, vi) => ico.faces.flatMap((f, fi) => f.includes(vi) ? [fi] : []));
+  return solid(verts, faces);
+}
+
+function cube() {
+  const verts = [];
+  for (const x of [1, -1]) for (const y of [1, -1]) for (const z of [1, -1]) verts.push([x, y, z]);
+  const faces = [];
+  for (const axis of [0, 1, 2]) {
+    for (const side of [1, -1]) faces.push(verts.flatMap((v, i) => v[axis] === side ? [i] : []));
+  }
+  return solid(verts, faces);
+}
+
+/* The d10 shape: two five-sided caps of kites meeting at a staggered belt. */
+
+function trapezohedron(n) {
+  const verts = [[0, 0, 1.35], [0, 0, -1.35]];
+  const ring = (offset, z) => Array.from({ length: n }, (_, i) => {
+    const a = (i + offset) * 2 * Math.PI / n;
+    return [Math.cos(a), Math.sin(a), z];
+  });
+  verts.push(...ring(0, 0.3), ...ring(0.5, -0.3));
+  const up = i => 2 + (i % n), low = i => 2 + n + (i % n);
+  const faces = [];
+  for (let i = 0; i < n; i++) {
+    faces.push([0, up(i), low(i), up(i + 1)], [1, low(i), up(i + 1), low(i + 1)]);
+  }
+  return solid(verts, faces);
+}
+
+/* Any class size without a classic solid gets a barrel die — a real shape,
+   with exactly one side per student. */
+
+function prism(n) {
+  const ring = z => Array.from({ length: n }, (_, i) => {
+    const a = (i + 0.5) * 2 * Math.PI / n;
+    return [Math.cos(a), Math.sin(a), z];
+  });
+  const verts = [...ring(0.72), ...ring(-0.72)];
+  /* Sides first: face 0 is the one turned to the camera, and a barrel die is
+     read off its side, not its end cap. */
+  const faces = [];
+  for (let i = 0; i < n; i++) {
+    faces.push([i, (i + 1) % n, n + (i + 1) % n, n + i]);
+  }
+  faces.push(Array.from({ length: n }, (_, i) => i), Array.from({ length: n }, (_, i) => n + i));
+  return solid(verts, faces);
+}
+
+const SOLIDS = {};
+
+function solidFor(sides) {
+  if (!SOLIDS[sides]) {
+    SOLIDS[sides] = sides === 4 ? solid([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]], [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
+      : sides === 6 ? cube()
+      : sides === 8 ? solid([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], triangleFaces([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]))
+      : sides === 10 ? trapezohedron(5)
+      : sides === 12 ? dodecahedron()
+      : sides === 20 ? icosahedron()
+      : prism(sides);
+  }
+  return SOLIDS[sides];
+}
+
+const LIGHT = v3.norm([-0.4, -0.72, 0.56]);
+
+function faceFill(shade) {
+  const tone = c => Math.round(c * shade);
+  return `rgb(${tone(247)} ${tone(238)} ${tone(214)})`;
+}
+
+/* Rotate, cull, sort, shade — the whole renderer. Returns the front-facing
+   face so the name can be laid flat on it. */
+
+function paintDie(die, angles, cx, cy, r) {
+  const [rx, ry, rz] = angles;
+  const pts = die.solid.verts.map(v => spin3(v, rx, ry, rz));
+  const project = p => [cx + p[0] * r * (1 + p[2] * 0.14), cy + p[1] * r * (1 + p[2] * 0.14)];
+
+  const visible = die.solid.faces
+    .map(idx => {
+      const mid = centroid(idx.map(i => pts[i]));
+      return { idx, normal: v3.norm(mid), depth: mid[2], mid };
+    })
+    .filter(f => f.normal[2] > 0.02)
+    .sort((a, b) => a.depth - b.depth);
+
+  die.polys.forEach((poly, i) => {
+    const face = visible[i];
+    if (!face) return poly.setAttribute('display', 'none');
+    poly.removeAttribute('display');
+    poly.setAttribute('points', face.idx.map(j => project(pts[j]).map(n => n.toFixed(1)).join(',')).join(' '));
+    poly.setAttribute('fill', faceFill(0.55 + 0.45 * Math.max(0, v3.dot(face.normal, LIGHT))));
+  });
+  return { front: visible.at(-1), project, pts };
+}
+
+function spin3(v, rx, ry, rz) {
+  let [x, y, z] = v;
+  [y, z] = [y * Math.cos(rx) - z * Math.sin(rx), y * Math.sin(rx) + z * Math.cos(rx)];
+  [x, z] = [x * Math.cos(ry) + z * Math.sin(ry), -x * Math.sin(ry) + z * Math.cos(ry)];
+  [x, y] = [x * Math.cos(rz) - y * Math.sin(rz), x * Math.sin(rz) + y * Math.cos(rz)];
+  return [x, y, z];
 }
 
 const dice = { group: document.getElementById('diceGroup'), dies: [], config: null };
 
 function setDiceFaces(parts) {
-  const width = dice.config.percentile ? 200 : 400;
   dice.dies.forEach((die, i) => {
     die.label.textContent = parts[i];
-    die.label.setAttribute('font-size', fitFontSize(parts[i], width, 120).toFixed(1));
+    sizeDieLabel(die);
   });
 }
+
+const FLOOR = 880;
 
 function buildDice(names) {
   dice.dies = [];
   if (!names.length) return stageMessage(dice.group);
   dice.group.replaceChildren();
   dice.config = diceConfig(names.length);
-  const spots = dice.config.percentile ? [320, 680] : [CX];
-  const r = dice.config.percentile ? 195 : 285;
-
-  /* A die never lands perfectly square-on, and neither should this one. */
-  const tilts = dice.config.percentile ? [-7, 6] : [-5];
+  const spots = dice.config.percentile ? [325, 675] : [CX];
+  const r = dice.config.percentile ? 165 : 245;
+  /* Resting three-quarters on, so the top and one side stay in view — square
+     to the camera a die is just a polygon. The pair lean differently. */
+  const tilts = dice.config.percentile ? [-0.09, 0.08] : [-0.05];
 
   spots.forEach((cx, i) => {
-    const shadow = svgEl('ellipse', { cx, cy: CY + r + 55, rx: r * 0.86, ry: r * 0.16, fill: '#04060a', opacity: 0.42 });
+    const shadow = svgEl('ellipse', { cx, cy: FLOOR, rx: r * 0.8, ry: r * 0.17, fill: '#04060a', opacity: 0.5 });
     const body = svgEl('g', {});
-    const label = svgEl('text', { x: cx, y: CY + 6, fill: '#241a05', ...nameStyle });
-    body.append(...facetedDie(dice.config.shape, cx, r), label);
+    const die = {
+      solid: solidFor(dice.config.sides), polys: [], shadow, body, cx, r,
+      rest: [-0.27 + tilts[i] * 0.4, 0.34 + tilts[i], tilts[i] * 0.5],
+      label: svgEl('text', { fill: '#241a05', ...nameStyle })
+    };
+    for (const _ of die.solid.faces) {
+      const poly = svgEl('polygon', { stroke: '#9a7638', 'stroke-width': 3, 'stroke-linejoin': 'round' });
+      die.polys.push(poly);
+      body.append(poly);
+    }
+    body.append(die.label);
     dice.group.append(shadow, body);
-    dice.dies.push({ body, label, shadow, cx, r, tilt: tilts[i] });
-    restDie(dice.dies[i]);
+    dice.dies.push(die);
+    poseDie(die, die.rest, 0);
   });
   setDiceFaces(dice.config.percentile ? ['d10', 'd10'] : [`d${dice.config.sides}`]);
 }
 
-/* The tumble sells the solid: it arcs in bouncing, spins, and squashes its
-   width as if turning end over end, while the shadow tightens under it. */
+/* height 0 is resting on the floor, 1 is the top of the throw. Bounces decay
+   the way a die's do — each hop lower and quicker than the last. */
+
+function bounceHeight(t) {
+  return Math.abs(Math.cos(Math.PI * 2.4 * t)) * (1 - t) ** 1.7;
+}
+
+function poseDie(die, angles, height) {
+  const lift = height * 470;
+  const cy = FLOOR - die.r * 1.05 - lift;
+  const squash = height < 0.02 ? 1 - 0.1 * Math.sin((0.02 - height) / 0.02 * Math.PI) : 1;
+  const view = paintDie(die, angles, die.cx, cy, die.r * squash);
+
+  /* Text is laid out horizontally, so what matters is the box the face
+     actually presents — a barrel's side band is wide and shallow, a d20's
+     triangle the opposite. Triangles get less of their box than the rest,
+     since their corners taper away from the line the text sits on. */
+  const spot = view.project(view.front.mid);
+  const corners = view.front.idx.map(i => view.project(view.pts[i]));
+  const xs = corners.map(p => p[0]), ys = corners.map(p => p[1]);
+  const tapered = corners.length === 3 ? 0.58 : 0.84;
+  die.faceWidth = (Math.max(...xs) - Math.min(...xs)) * tapered;
+  die.faceHeight = (Math.max(...ys) - Math.min(...ys)) * tapered * 0.72;
+  die.label.setAttribute('x', spot[0].toFixed(1));
+  die.label.setAttribute('y', (spot[1] + die.faceHeight * 0.16).toFixed(1));
+  sizeDieLabel(die);
+
+  die.shadow.setAttribute('rx', (die.r * 0.8 * (1 - height * 0.42)).toFixed(1));
+  die.shadow.setAttribute('ry', (die.r * 0.17 * (1 - height * 0.42)).toFixed(1));
+  die.shadow.setAttribute('opacity', (0.5 * (1 - height * 0.62)).toFixed(2));
+}
+
+function sizeDieLabel(die) {
+  const text = die.label.textContent;
+  if (!text) return;
+  const size = Math.min(fitFontSize(text, die.faceWidth || 300, 110), die.faceHeight || 110);
+  die.label.setAttribute('font-size', Math.max(26, size).toFixed(1));
+}
 
 function tumbleDie(die, eased, t) {
   const away = 1 - eased;
-  const hop = Math.abs(Math.sin(Math.PI * 2.6 * t)) * away;
-  const dx = -430 * away, dy = -520 * away - hop * 190;
-  const turn = Math.max(0.24, Math.abs(Math.cos(eased * Math.PI * 5)));
-  const land = t > 0.86 ? 1 - 0.14 * Math.sin((t - 0.86) / 0.14 * Math.PI) : 1;
-
-  die.body.setAttribute('transform', diePose(die, dx, dy, die.tilt - 900 * away, turn, land));
-  die.shadow.setAttribute('rx', (die.r * 0.86 * (1 - hop * 0.45)).toFixed(1));
-  die.shadow.setAttribute('opacity', (0.42 * (1 - hop * 0.55)).toFixed(2));
-}
-
-function diePose(die, dx, dy, rot, sx, sy) {
-  return `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) translate(${die.cx} ${CY}) `
-    + `rotate(${rot.toFixed(1)}) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(${-die.cx} ${-CY})`;
+  poseDie(die, [
+    die.rest[0] + away * 15.2,
+    die.rest[1] + away * 11.4,
+    die.rest[2] + away * 6.8
+  ], bounceHeight(t));
+  const drift = -430 * away;
+  die.body.setAttribute('transform', `translate(${drift.toFixed(1)} 0)`);
+  die.shadow.setAttribute('cx', (die.cx + drift).toFixed(1));
 }
 
 function restDie(die) {
-  die.body.setAttribute('transform', diePose(die, 0, 0, die.tilt, 1, 1));
-  die.shadow.setAttribute('rx', (die.r * 0.86).toFixed(1));
-  die.shadow.setAttribute('opacity', 0.42);
+  die.body.removeAttribute('transform');
+  die.shadow.setAttribute('cx', die.cx);
+  poseDie(die, die.rest, 0);
 }
 
 function diceFaces(ctx, rng) {
