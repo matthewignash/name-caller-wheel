@@ -648,6 +648,37 @@
           <circle cx="500" cy="500" r="26" fill="#e8b34b"/>
         </svg>
       </div>
+
+      <div class="picker" data-picker="dice">
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Rolling dice">
+          <g id="diceGroup"></g>
+        </svg>
+      </div>
+
+      <div class="picker" data-picker="eightball">
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Magic eight ball">
+          <defs>
+            <radialGradient id="ballShade" cx="34%" cy="26%" r="78%">
+              <stop offset="0%" stop-color="#454d61"/>
+              <stop offset="42%" stop-color="#161b26"/>
+              <stop offset="100%" stop-color="#04060a"/>
+            </radialGradient>
+          </defs>
+          <g id="ballGroup"></g>
+        </svg>
+      </div>
+
+      <div class="picker" data-picker="sticks">
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Cup of name sticks">
+          <g id="sticksGroup"></g>
+        </svg>
+      </div>
+
+      <div class="picker" data-picker="plinko">
+        <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Plinko board">
+          <g id="plinkoGroup"></g>
+        </svg>
+      </div>
     </div>
   </div>
 
@@ -701,6 +732,10 @@
     <select id="setPicker">
       <option value="wheel">Classic wheel</option>
       <option value="bigwheel">Big wheel</option>
+      <option value="dice">Dice roll</option>
+      <option value="eightball">Magic 8-ball</option>
+      <option value="sticks">Popsicle sticks</option>
+      <option value="plinko">Plinko</option>
     </select>
   </div>
   <div class="dialog-field">
@@ -1088,6 +1123,348 @@ const bigWheelSpin = {
   }
 };
 
+function stageMessage(group) {
+  group.replaceChildren(svgEl('text', {
+    x: CX, y: CY, fill: '#f6f1e5', 'font-size': 44,
+    'text-anchor': 'middle', 'dominant-baseline': 'middle'
+  }, 'No active students'));
+}
+
+function fitFontSize(text, width, max) {
+  return Math.min(max, width / Math.max(text.length * 0.56, 1));
+}
+
+const nameStyle = {
+  'font-family': 'ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif',
+  'font-weight': 700, 'text-anchor': 'middle', 'dominant-baseline': 'middle'
+};
+
+/* ---------- Dice: the die is sized to the class ----------
+   Faces map to students, so twelve of them roll a d12 and the die itself
+   tells you how big the class is. Past twenty that stops being a solid you
+   can hold, so it becomes two d10s read as tens and units. Every roll is
+   computed backwards from the winner, which is why it never has to re-roll
+   for a number nobody owns. */
+
+const DIE_SHAPES = { 4: 'tri', 6: 'cube', 8: 'diamond', 10: 'kite', 12: 'pentagon', 20: 'hexagon' };
+const POLY_SIDES = { tri: 3, diamond: 4, pentagon: 5, hexagon: 6 };
+
+function diceConfig(count) {
+  if (count > 20) return { percentile: true, shape: 'kite' };
+  const sides = Math.max(4, count);
+  return { percentile: false, sides, shape: DIE_SHAPES[sides] || 'barrel' };
+}
+
+function polygonPoints(sides, radius, cx, cy) {
+  return Array.from({ length: sides }, (_, i) => {
+    const a = (-90 + i * 360 / sides) * Math.PI / 180;
+    return `${(cx + radius * Math.cos(a)).toFixed(1)},${(cy + radius * Math.sin(a)).toFixed(1)}`;
+  }).join(' ');
+}
+
+function dieBody(shape, cx, r) {
+  const skin = { fill: '#f6f1e5', stroke: '#8a6420', 'stroke-width': 9, 'stroke-linejoin': 'round' };
+  if (POLY_SIDES[shape]) return svgEl('polygon', { points: polygonPoints(POLY_SIDES[shape], r, cx, CY), ...skin });
+  if (shape === 'kite') {
+    return svgEl('polygon', {
+      points: `${cx},${CY - r} ${cx + r * 0.86},${CY - r * 0.12} ${cx + r * 0.34},${CY + r * 0.72} ${cx},${CY + r} ${cx - r * 0.34},${CY + r * 0.72} ${cx - r * 0.86},${CY - r * 0.12}`,
+      ...skin
+    });
+  }
+  const w = r * (shape === 'barrel' ? 2 : 1.62), h = r * 1.5;
+  return svgEl('rect', { x: cx - w / 2, y: CY - h / 2, width: w, height: h, rx: shape === 'barrel' ? h / 2 : r * 0.2, ...skin });
+}
+
+const dice = { group: document.getElementById('diceGroup'), labels: [], config: null };
+
+function setDiceFaces(parts) {
+  const width = dice.config.percentile ? 220 : 470;
+  dice.labels.forEach((el, i) => {
+    el.textContent = parts[i];
+    el.setAttribute('font-size', fitFontSize(parts[i], width, 150).toFixed(1));
+  });
+}
+
+function buildDice(names) {
+  dice.labels = [];
+  if (!names.length) return stageMessage(dice.group);
+  dice.group.replaceChildren();
+  dice.config = diceConfig(names.length);
+  const spots = dice.config.percentile ? [320, 680] : [CX];
+  const radius = dice.config.percentile ? 195 : 290;
+
+  for (const cx of spots) {
+    dice.group.append(dieBody(dice.config.shape, cx, radius));
+    const label = svgEl('text', { x: cx, y: CY, fill: '#241a05', ...nameStyle });
+    dice.group.append(label);
+    dice.labels.push(label);
+  }
+  dice.group.removeAttribute('transform');
+  setDiceFaces(dice.config.percentile ? ['d10', 'd10'] : [`d${dice.config.sides}`]);
+}
+
+function diceTransform(eased, t) {
+  const away = 1 - eased;
+  const bounce = Math.abs(Math.sin(Math.PI * 2.6 * t)) * 150 * (1 - t);
+  return `translate(${(-430 * away).toFixed(1)} ${(-540 * away - bounce).toFixed(1)}) rotate(${(-960 * away).toFixed(1)} ${CX} ${CY})`;
+}
+
+function diceFaces(ctx, rng) {
+  if (dice.config.percentile) {
+    const digits = String(ctx.index + 1).padStart(2, '0').split('');
+    return { final: digits, flick: () => [0, 1].map(() => String(Math.floor(rng() * 10))) };
+  }
+  return { final: [ctx.name], flick: () => [stage.names[Math.floor(rng() * stage.names.length)]] };
+}
+
+function playDice(ctx) {
+  const { final, flick } = diceFaces(ctx, mulberry32(ctx.seed));
+  if (ctx.instant) {
+    dice.group.removeAttribute('transform');
+    setDiceFaces(final);
+    return ctx.done();
+  }
+  const flicks = Array.from({ length: 16 }, flick);
+  let shown = -1;
+
+  animate({
+    durationMs: ctx.durationMs,
+    ease: easeOutCubic,
+    frame: (eased, t) => {
+      dice.group.setAttribute('transform', diceTransform(eased, t));
+      const i = Math.min(flicks.length - 1, Math.floor(eased * flicks.length));
+      if (i === shown) return;
+      shown = i;
+      setDiceFaces(t > 0.86 ? final : flicks[i]);
+      audio.tick();
+    },
+    done: () => {
+      dice.group.removeAttribute('transform');
+      setDiceFaces(final);
+      ctx.done();
+    }
+  });
+}
+
+/* ---------- Magic 8-ball ----------
+   Shake, then turn it over: the 8 fades out as the answer window floats up
+   carrying the name. The jitter is a seeded sequence sampled by time, so
+   every screen shakes the same way. */
+
+const ball = { group: document.getElementById('ballGroup'), badge: null, window: null, label: null };
+
+function buildBall(names) {
+  if (!names.length) return stageMessage(ball.group);
+  ball.group.removeAttribute('transform');
+  ball.badge = svgEl('g', {});
+  ball.badge.append(
+    svgEl('circle', { cx: CX, cy: CY, r: 150, fill: '#f6f1e5' }),
+    svgEl('text', { x: CX, y: CY + 6, fill: '#10131a', 'font-size': 190, ...nameStyle }, '8')
+  );
+  ball.window = svgEl('g', { opacity: 0 });
+  ball.label = svgEl('text', { x: CX, y: CY + 4, fill: '#dbe6ff', ...nameStyle });
+  ball.window.append(
+    svgEl('circle', { cx: CX, cy: CY, r: 235, fill: '#0a0f1c', stroke: '#2a3346', 'stroke-width': 8 }),
+    svgEl('polygon', { points: `${CX},${CY - 190} ${CX + 200},${CY + 130} ${CX - 200},${CY + 130}`, fill: '#274bb5' }),
+    ball.label
+  );
+  ball.group.replaceChildren(
+    svgEl('circle', { cx: CX, cy: CY, r: 470, fill: 'url(#ballShade)', stroke: '#2b3446', 'stroke-width': 6 }),
+    svgEl('ellipse', { cx: CX - 168, cy: CY - 212, rx: 96, ry: 54, fill: '#f6f1e5', opacity: 0.09, transform: `rotate(-28 ${CX - 168} ${CY - 212})` }),
+    ball.badge,
+    ball.window
+  );
+}
+
+function playBall(ctx) {
+  const rng = mulberry32(ctx.seed);
+  const reveal = () => {
+    ball.group.removeAttribute('transform');
+    ball.badge.setAttribute('opacity', 0);
+    ball.window.setAttribute('opacity', 1);
+    ball.label.textContent = ctx.name;
+    ball.label.setAttribute('font-size', fitFontSize(ctx.name, 330, 92).toFixed(1));
+  };
+  if (ctx.instant) {
+    reveal();
+    return ctx.done();
+  }
+  ball.badge.setAttribute('opacity', 1);
+  ball.window.setAttribute('opacity', 0);
+  const shakes = Array.from({ length: 40 }, () => [rng() * 2 - 1, rng() * 2 - 1]);
+
+  animate({
+    durationMs: ctx.durationMs,
+    ease: t => t,
+    frame: (_, t) => {
+      const settling = Math.max(0, 1 - t / 0.7);
+      const [jx, jy] = shakes[Math.min(shakes.length - 1, Math.floor(t * shakes.length))];
+      ball.group.setAttribute('transform', `translate(${(jx * 70 * settling).toFixed(1)} ${(jy * 55 * settling).toFixed(1)})`);
+      if (t > 0.7 && ball.badge.getAttribute('opacity') !== '0') reveal();
+    },
+    done: ctx.done
+  });
+}
+
+/* ---------- Popsicle sticks ----------
+   Blank sides out, so the sticks give nothing away: the one that rises is
+   chosen by the seed, and the name only exists once it has flipped over. */
+
+const sticks = { group: document.getElementById('sticksGroup'), items: [], cup: null };
+
+const PULLED_Y = 300;
+
+function stickAt(index, total) {
+  const spread = Math.min(64, 6 * total);
+  const angle = total === 1 ? 0 : -spread / 2 + index * (spread / (total - 1));
+  const lean = angle * Math.PI / 180;
+  return { x: CX + Math.sin(lean) * 210, y: 545 - Math.cos(lean) * 15, angle };
+}
+
+function buildSticks(names) {
+  sticks.items = [];
+  if (!names.length) return stageMessage(sticks.group);
+  const shown = Math.min(names.length, 24);
+  sticks.group.replaceChildren();
+
+  for (let i = 0; i < shown; i++) {
+    const at = stickAt(i, shown);
+    const stick = svgEl('g', { transform: stickPose(at, 0, 1) });
+    const label = svgEl('text', { x: 0, y: 0, transform: 'rotate(-90)', fill: '#5a3417', opacity: 0, ...nameStyle });
+    stick.append(
+      svgEl('rect', { x: -30, y: -250, width: 60, height: 500, rx: 30, fill: '#d9ac6a', stroke: '#a97c3d', 'stroke-width': 5 }),
+      label
+    );
+    sticks.group.append(stick);
+    sticks.items.push({ el: stick, label, at });
+  }
+  sticks.cup = svgEl('path', { d: `M ${CX - 190} 700 L ${CX + 190} 700 L ${CX + 150} 950 L ${CX - 150} 950 Z`, fill: '#7c4a21', stroke: '#5a3417', 'stroke-width': 8 });
+  sticks.group.append(sticks.cup);
+}
+
+/* The flip scales across the stick's width, not its length — squashing the
+   long axis would read as the stick shrinking rather than turning over. */
+
+function stickPose(at, pulled, flip) {
+  const x = at.x + (CX - at.x) * pulled;
+  const y = at.y + (PULLED_Y - at.y) * pulled;
+  const angle = at.angle + (90 - at.angle) * pulled;
+  return `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(1)}) scale(${flip.toFixed(3)} 1)`;
+}
+
+function resetSticks() {
+  for (const s of sticks.items) {
+    s.el.setAttribute('transform', stickPose(s.at, 0, 1));
+    s.label.setAttribute('opacity', 0);
+    sticks.group.append(s.el);
+  }
+  sticks.group.append(sticks.cup);
+}
+
+function playSticks(ctx) {
+  const item = sticks.items[Math.floor(mulberry32(ctx.seed)() * sticks.items.length)];
+  resetSticks();
+  sticks.group.append(item.el);
+  const show = () => {
+    item.label.textContent = ctx.name;
+    item.label.setAttribute('font-size', fitFontSize(ctx.name, 440, 78).toFixed(1));
+    item.label.setAttribute('opacity', 1);
+  };
+  if (ctx.instant) {
+    item.el.setAttribute('transform', stickPose(item.at, 1, 1));
+    show();
+    return ctx.done();
+  }
+
+  animate({
+    durationMs: ctx.durationMs,
+    ease: easeOutCubic,
+    frame: eased => {
+      const flip = eased < 0.72 ? 1 : Math.abs(Math.cos((eased - 0.72) / 0.28 * Math.PI));
+      item.el.setAttribute('transform', stickPose(item.at, Math.min(1, eased / 0.65), Math.max(0.05, flip)));
+      if (eased > 0.86) show();
+    },
+    done: () => {
+      item.el.setAttribute('transform', stickPose(item.at, 1, 1));
+      show();
+      ctx.done();
+    }
+  });
+}
+
+/* ---------- Plinko ----------
+   The chip walks a constrained random path: at every row it picks freely
+   among the steps that can still reach the winner's slot without leaving
+   the board, so it wanders honestly and still arrives where it must. */
+
+const plinko = { group: document.getElementById('plinkoGroup'), chip: null, slots: 0, rows: 0 };
+
+const slotX = i => 60 + (i + 0.5) * (880 / plinko.slots);
+const rowY = r => 120 + r * (600 / plinko.rows);
+
+function buildPlinko(names) {
+  if (!names.length) return stageMessage(plinko.group);
+  plinko.slots = names.length;
+  plinko.rows = Math.min(16, Math.max(6, Math.ceil(names.length / 2) + 2));
+  plinko.group.replaceChildren();
+  const step = 880 / plinko.slots;
+
+  for (let r = 0; r < plinko.rows; r++) {
+    for (let i = 0; i <= plinko.slots; i++) {
+      const x = 60 + (i + (r % 2 ? 0.5 : 0)) * step;
+      if (x <= 945) plinko.group.append(svgEl('circle', { cx: x.toFixed(1), cy: rowY(r), r: Math.min(9, step * 0.16), fill: '#8f9bb3' }));
+    }
+  }
+  for (let i = 0; i < plinko.slots; i++) {
+    plinko.group.append(svgEl('rect', { x: 60 + i * step + 2, y: 800, width: step - 4, height: 150, rx: 8, fill: i % 2 ? '#1d2738' : '#243149' }));
+    plinko.group.append(svgEl('text', { x: slotX(i), y: 880, fill: '#cfd7e6', 'font-size': Math.min(46, step * 0.7).toFixed(1), ...nameStyle }, String(i + 1)));
+  }
+  plinko.chip = svgEl('circle', { cx: slotX((plinko.slots - 1) / 2), cy: rowY(0) - 70, r: Math.min(26, step * 0.42), fill: '#e8b34b', stroke: '#8a6420', 'stroke-width': 6 });
+  plinko.group.append(plinko.chip);
+}
+
+function plinkoPath(target, rng) {
+  let pos = Math.round((plinko.slots - 1) / 2);
+  const path = [pos];
+  for (let r = 0; r < plinko.rows; r++) {
+    const left = plinko.rows - r - 1;
+    const options = [-1, 0, 1].filter(s =>
+      pos + s >= 0 && pos + s <= plinko.slots - 1 && Math.abs(target - (pos + s)) <= left);
+    pos += options[Math.floor(rng() * options.length)];
+    path.push(pos);
+  }
+  return path;
+}
+
+function playPlinko(ctx) {
+  const path = plinkoPath(ctx.index, mulberry32(ctx.seed));
+  const land = () => {
+    plinko.chip.setAttribute('cx', slotX(ctx.index).toFixed(1));
+    plinko.chip.setAttribute('cy', 875);
+  };
+  if (ctx.instant) {
+    land();
+    return ctx.done();
+  }
+  let lastRow = -1;
+
+  animate({
+    durationMs: ctx.durationMs,
+    ease: t => t,
+    frame: (_, t) => {
+      const at = t * plinko.rows;
+      const row = Math.min(plinko.rows - 1, Math.floor(at));
+      const frac = at - row;
+      const x = slotX(path[row]) + (slotX(path[row + 1]) - slotX(path[row])) * frac;
+      const y = rowY(row) + ((row + 1 < plinko.rows ? rowY(row + 1) : 875) - rowY(row)) * (frac * frac);
+      plinko.chip.setAttribute('cx', x.toFixed(1));
+      plinko.chip.setAttribute('cy', y.toFixed(1));
+      if (row !== lastRow) { lastRow = row; audio.tick(); }
+    },
+    done: () => { land(); ctx.done(); }
+  });
+}
+
 const PICKERS = {
   wheel: {
     build(names) {
@@ -1104,7 +1481,12 @@ const PICKERS = {
       bigWheelSpin.apply(bigWheelSpin.rotation, 1);
     },
     play(ctx) { runSpin(bigWheelSpin, ctx, easeOutCubic); }
-  }
+  },
+
+  dice: { build: buildDice, play: playDice },
+  eightball: { build: buildBall, play: playBall },
+  sticks: { build: buildSticks, play: playSticks },
+  plinko: { build: buildPlinko, play: playPlinko }
 };
 
 function currentStyle() {
@@ -1280,6 +1662,7 @@ const rendererHandlers = {
 
     PICKERS[stage.styleKey].play({
       index,
+      name: cmd.target,
       seed: cmd.seed,
       durationMs: cmd.durationMs,
       instant: cmd.skipAnim || prefersReducedMotion,

@@ -9,7 +9,8 @@ A wheel-of-fortune name picker for the classroom: the wheel spins on the project
 ## What it does
 
 - **Spin a wheel of student names** with a satisfying animation, a big reveal, and confetti. Or skip the animation when the lesson needs pace.
-- **Pick your prop.** The classic wheel, or a Price-Is-Right big wheel with pegs and a flapper that ticks past every seam. Choose it in Settings; the projector follows. Novelty is the point — the same ritual four hundred times is no ritual at all.
+- **Six ways to call a name.** The classic wheel, a Price-Is-Right big wheel with pegs and a flapper, a die, a Magic 8-Ball, a cup of popsicle sticks, or a plinko chip. Choose in Settings; the projector follows. Novelty is the point — the same ritual four hundred times is no ritual at all.
+- **The die is sized to your class.** Twelve students roll a d12, twenty roll a d20, and past that it becomes two d10s read as tens and units. The die itself tells the room how many of them are in the pool.
 - **Two screens, one brain.** The projector view is just the wheel — no buttons, no roster, nothing for wandering eyes. The teacher view runs on your phone or laptop and drives everything: spin, switch class, toggle students in or out, reset the round.
 - **Everyone before anyone repeats.** Students who have been called drop out of the pool until you reset the round. Absent today? One toggle removes them from the wheel.
 - **Call on exactly who you need.** A discreet button beside each name runs the identical spin animation, landing on that student. On the projector it is indistinguishable from a random pick — but your log records the difference.
@@ -104,7 +105,7 @@ The URL and key are saved per browser, so repeat step 5 once on each device you 
 
 ## What students see
 
-The wheel, the class name, and the winner. No roster list, no controls, no way to navigate anywhere else from the projected page. The Sheet, the log, and the teacher view exist only on your side of the desk.
+Whichever picker you chose, the class name, and the winner. No roster list, no controls, no way to navigate anywhere else from the projected page. The Sheet, the log, and the teacher view exist only on your side of the desk.
 
 ## Repo layout
 
