@@ -91,6 +91,7 @@ The URL and key are saved per browser, so repeat step 5 once on each device you 
 ### 6. Classroom setup
 
 - On the classroom computer, open the **projector link** (copy it from the bottom of the teacher panel) and bookmark it. Full-screen it with F11.
+- **Changing the visual at the projector:** move the mouse on the classroom machine and a small style menu fades in at the top right, then fades away again a few seconds later. Students never see it unless the mouse moves. Choosing there changes the visual everywhere and saves to your Sheet, exactly as the teacher panel's Settings does.
 - Running both from one machine? Click **Open** beside that link. The projector view lands in a second tab — drag it to the projector screen and F11 it — while the teacher panel stays live in the first.
 - Keep the teacher view open on your phone. Spin from anywhere in the room.
 - After class, open the Sheet's Log tab. Add your own notes in the Note column — the app never touches it.
@@ -100,6 +101,7 @@ The URL and key are saved per browser, so repeat step 5 once on each device you 
 - **"Demo data — your Sheet could not be reached."** The URL or key is wrong, or the deployment changed. Re-check Settings; make sure the URL ends in `/exec` and the key matches the script property exactly.
 - **Changed Code.gs and nothing happened?** Apps Script serves the deployed version, not the saved one. Deploy → Manage deployments → edit → new version.
 - **Picker style resets to the wheel on every reload?** Your deployed `Code.gs` predates the setting, so it drops `pickerStyle` when the app reads your Sheet back. Re-paste [`apps-script/Code.gs`](apps-script/Code.gs) and deploy a new version. The choice works fine within a session either way — it just will not stick.
+- **"This screen is running an older version — reload it."** That screen was asked for a visual its copy of the page does not have, so it fell back to the wheel. Hard-refresh it (Cmd/Ctrl+Shift+R). Projector tabs sit open for weeks and are the usual culprit.
 - **Roster edits in the Sheet not showing?** The app loads rosters when a view opens. Reload the page after editing the Sheet directly.
 - **Projector not reacting to your phone?** It checks the Sheet every ~2 seconds and pauses while its tab is hidden. Make sure the projector tab is actually visible, and that both devices carry the URL + key.
 

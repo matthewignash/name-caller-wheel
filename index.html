@@ -218,6 +218,31 @@
     filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.6));
   }
 
+  /* The projector's only control: asleep and untouchable until the mouse
+     moves at that machine, so students never see a thing. */
+
+  .projector-controls {
+    position: fixed;
+    top: 1rem;
+    right: 1.3rem;
+    z-index: 25;
+    display: none;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s;
+  }
+
+  body.mode-projector .projector-controls { display: block; }
+
+  .projector-controls.is-awake { opacity: 1; pointer-events: auto; }
+
+  .projector-controls select {
+    width: auto;
+    font-size: 0.9rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--ink-raise);
+  }
+
   /* ---------- Control panel ---------- */
 
   .panel {
@@ -618,6 +643,11 @@
 </section>
 
 <section id="main" class="view" aria-label="Name caller wheel">
+  <div class="projector-controls" id="projectorControls">
+    <label class="visually-hidden" for="projectorPicker">Picker style</label>
+    <select id="projectorPicker"></select>
+  </div>
+
   <div class="stage">
     <div class="stage-class" id="stageClass"></div>
     <div class="picker-stage" id="pickerStage">
@@ -1500,6 +1530,11 @@ function currentStyle() {
 function buildStage(names) {
   stage.names = names;
   stage.styleKey = currentStyle();
+  /* A style this build has never heard of means the page is out of date —
+     say so, rather than quietly showing the wheel and looking broken. */
+  if (app.settings.pickerStyle && app.settings.pickerStyle !== stage.styleKey) {
+    showBadge('This screen is running an older version — reload it.');
+  }
   stage.paletteKey = app.settings.palette;
   for (const el of stageEl.children) el.classList.toggle('is-active', el.dataset.picker === stage.styleKey);
   PICKERS[stage.styleKey].build(names);
@@ -1603,7 +1638,8 @@ const app = {
   skipAnim: false,
   spinning: false,
   executedCommands: new Set(),
-  revealTimer: null
+  revealTimer: null,
+  controlsTimer: null
 };
 
 const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1619,10 +1655,17 @@ function broadcast(msg) {
   try { channel?.postMessage(msg); } catch {}
 }
 
+/* Controllers still refuse roster and spin commands off the wire — they are
+   the source of truth for those. SETTINGS is the exception: the projector is
+   allowed to change the visual for everyone. */
+
 channel?.addEventListener('message', e => {
   const msg = e.data;
-  if (app.mode === 'projector' && msg.type !== 'REQUEST_SYNC') executeCommand(msg);
-  else if (isController() && msg.type === 'REQUEST_SYNC') broadcast(syncCommand());
+  if (msg.type === 'REQUEST_SYNC') {
+    if (isController()) broadcast(syncCommand());
+  } else if (app.mode === 'projector' || msg.type === 'SETTINGS') {
+    executeCommand(msg);
+  }
 });
 
 /* ================= Command protocol =================
@@ -1635,6 +1678,13 @@ function snapshot() {
 
 function syncCommand() {
   return { type: 'SYNC', id: newCommandId(), ...snapshot() };
+}
+
+/* Settings without a snapshot, so the projector can change the visual for
+   everyone without claiming to know a roster it does not hold. */
+
+function settingsCommand() {
+  return { type: 'SETTINGS', id: newCommandId(), settings: { ...app.settings } };
 }
 
 function dispatch(cmd) {
@@ -1675,19 +1725,29 @@ const rendererHandlers = {
   SYNC: applySnapshot,
   SWITCH_CLASS: applySnapshot,
   ROSTER_CHANGED: applySnapshot,
-  RESET_ROUND() {}
+  RESET_ROUND() {},
+  SETTINGS(cmd) {
+    applySettings(cmd);
+    if (stageIsStale(stage.names)) buildStage(stage.names);
+  }
 };
 
 function applySnapshot(cmd) {
   ui.stageClass.textContent = cmd.className;
-  if (cmd.settings) app.settings = { ...app.settings, ...cmd.settings };
+  applySettings(cmd);
   if (stageIsStale(cmd.activeNames)) buildStage(cmd.activeNames);
+}
+
+function applySettings(cmd) {
+  if (cmd.settings) app.settings = { ...app.settings, ...cmd.settings };
+  ui.projectorPicker.value = currentStyle();
 }
 
 const controllerHandlers = {
   SWITCH_CLASS() { renderClassSelect(); renderRoster(); },
   ROSTER_CHANGED() { renderRoster(); },
-  RESET_ROUND() { renderRoster(); }
+  RESET_ROUND() { renderRoster(); },
+  SETTINGS: applySettings
 };
 
 /* ================= Selection logic (pure) ================= */
@@ -1784,6 +1844,8 @@ const ui = {
   revealName: document.getElementById('revealName'),
   announcer: document.getElementById('announcer'),
   demoBadge: document.getElementById('demoBadge'),
+  projectorControls: document.getElementById('projectorControls'),
+  projectorPicker: document.getElementById('projectorPicker'),
   settingsDialog: document.getElementById('settingsDialog'),
   resetDialog: document.getElementById('resetDialog'),
   resetMessage: document.getElementById('resetMessage')
@@ -2007,7 +2069,37 @@ async function enterProjector() {
     ui.stageClass.textContent = firstClass;
     buildStage(SAMPLE_DATA.classes[firstClass]);
   }
+  armProjectorControls();
   broadcast({ type: 'REQUEST_SYNC' });
+}
+
+/* The control sleeps until someone moves the mouse at the projector machine,
+   and stays awake while the menu itself has focus so it cannot vanish
+   mid-choice. */
+
+function armProjectorControls() {
+  for (const opt of document.getElementById('setPicker').options) {
+    ui.projectorPicker.append(new Option(opt.textContent, opt.value));
+  }
+  ui.projectorPicker.value = currentStyle();
+
+  const sleep = () => {
+    if (document.activeElement === ui.projectorPicker) return wake();
+    ui.projectorControls.classList.remove('is-awake');
+  };
+  const wake = () => {
+    ui.projectorControls.classList.add('is-awake');
+    clearTimeout(app.controlsTimer);
+    app.controlsTimer = setTimeout(sleep, 3000);
+  };
+  addEventListener('mousemove', wake);
+  addEventListener('touchstart', wake);
+  ui.projectorPicker.addEventListener('change', e => {
+    app.settings.pickerStyle = e.target.value;
+    backendWrite(app.store.saveSettings({ pickerStyle: e.target.value }));
+    dispatch(settingsCommand());
+    wake();
+  });
 }
 
 /* The polling channel: how the projector hears a teacher on another device.
