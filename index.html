@@ -1189,6 +1189,7 @@ function diceConfig(count) {
    pick up rather than a picture of one. */
 
 const v3 = {
+  add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
   sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
   dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
   cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
@@ -1242,11 +1243,28 @@ function faceCamera(verts, faces) {
   });
 }
 
+/* Normalised by inradius — the distance from the centre to a face — so a d20
+   and a d6 built at the same r read as the same size die. Scaling by the
+   circumradius instead makes the many-faced solids look shrunken. */
+
 function solid(rawVerts, rawFaces) {
-  const scale = Math.max(...rawVerts.map(v => v3.len(v)));
-  const scaled = rawVerts.map(p => p.map(c => c / scale));
-  const faces = rawFaces.map(f => orderFace(f, scaled));
-  return { verts: faceCamera(scaled, faces), faces };
+  const ordered = rawFaces.map(f => orderFace(f, rawVerts));
+  const inradius = Math.min(...ordered.map(f => v3.len(centroid(f.map(i => rawVerts[i])))));
+  const scaled = rawVerts.map(p => p.map(c => c / inradius));
+  const faces = ordered.map(f => orderFace(f, scaled));
+  const verts = faceCamera(scaled, faces);
+  return { verts, faces, room: faces.map(f => faceRoom(f, verts)) };
+}
+
+/* How much flat space a face offers its marking, in solid units: the distance
+   from its centre to the nearest edge. */
+
+function faceRoom(idx, verts) {
+  const mid = centroid(idx.map(i => verts[i]));
+  return Math.min(...idx.map((v, i) => {
+    const a = verts[v], b = verts[idx[(i + 1) % idx.length]];
+    return v3.len(v3.sub(centroid([a, b]), mid));
+  }));
 }
 
 function icosahedron() {
@@ -1332,21 +1350,26 @@ function faceFill(shade) {
   return `rgb(${tone(247)} ${tone(238)} ${tone(214)})`;
 }
 
-/* Rotate, cull, sort, shade — the whole renderer. Returns the front-facing
-   face so the name can be laid flat on it. */
+const VIEW = [0, 0, 1];
 
-function paintDie(die, angles, cx, cy, r) {
-  const [rx, ry, rz] = angles;
-  const pts = die.solid.verts.map(v => spin3(v, rx, ry, rz));
-  const project = p => [cx + p[0] * r * (1 + p[2] * 0.14), cy + p[1] * r * (1 + p[2] * 0.14)];
+/* Rotate, cull, sort back to front, shade. Each face carries its own marking,
+   laid onto the face's own plane so it foreshortens with the solid instead of
+   floating over it. */
+
+function paintDie(die, q, cx, cy, r, squash = 1) {
+  const pts = die.solid.verts.map(v => qApply(q, v));
+  const project = p => {
+    const k = r * (1 + p[2] * 0.14);
+    return [cx + p[0] * k / squash, cy + p[1] * k * squash];
+  };
 
   const visible = die.solid.faces
-    .map(idx => {
+    .map((idx, face) => {
       const mid = centroid(idx.map(i => pts[i]));
-      return { idx, normal: v3.norm(mid), depth: mid[2], mid };
+      return { idx, face, normal: v3.norm(mid), mid };
     })
     .filter(f => f.normal[2] > 0.02)
-    .sort((a, b) => a.depth - b.depth);
+    .sort((a, b) => a.mid[2] - b.mid[2]);
 
   die.polys.forEach((poly, i) => {
     const face = visible[i];
@@ -1355,27 +1378,112 @@ function paintDie(die, angles, cx, cy, r) {
     poly.setAttribute('points', face.idx.map(j => project(pts[j]).map(n => n.toFixed(1)).join(',')).join(' '));
     poly.setAttribute('fill', faceFill(0.55 + 0.45 * Math.max(0, v3.dot(face.normal, LIGHT))));
   });
-  return { front: visible.at(-1), project, pts };
+
+  const shown = new Set(visible.map(f => f.face));
+  die.marks.forEach((mark, face) => placeMark(die, mark, face, shown.has(face), pts, project));
+
+  return visible.reduce((best, f) => !best || f.normal[2] > best.normal[2] ? f : best, null);
 }
 
-function spin3(v, rx, ry, rz) {
-  let [x, y, z] = v;
-  [y, z] = [y * Math.cos(rx) - z * Math.sin(rx), y * Math.sin(rx) + z * Math.cos(rx)];
-  [x, z] = [x * Math.cos(ry) + z * Math.sin(ry), -x * Math.sin(ry) + z * Math.cos(ry)];
-  [x, y] = [x * Math.cos(rz) - y * Math.sin(rz), x * Math.sin(rz) + y * Math.cos(rz)];
-  return [x, y, z];
+/* A face's marking rides its own plane: two in-plane axes projected to screen
+   become the text's transform, so it leans and foreshortens with the face. */
+
+function placeMark(die, mark, face, visible, pts, project) {
+  if (!visible || !mark.textContent) return mark.setAttribute('display', 'none');
+  const idx = die.solid.faces[face];
+  const mid = centroid(idx.map(i => pts[i]));
+  const u = v3.norm(v3.sub(pts[idx[0]], mid));
+  const w = v3.cross(v3.norm(mid), u);
+  const o = project(mid), pu = project(v3.add(mid, u)), pw = project(v3.add(mid, w));
+  /* u and w here are the same in-plane axes qFacing cancels against, so a
+     landed face reads upright. */
+  const m = [pu[0] - o[0], pu[1] - o[1], pw[0] - o[0], pw[1] - o[1], o[0], o[1]];
+  mark.removeAttribute('display');
+  mark.setAttribute('transform', `matrix(${m.map(n => n.toFixed(4)).join(' ')})`);
+}
+
+/* Orientation is a quaternion, not three angles. Euler angles locked to one
+   scalar can express neither "tumble about this axis" nor "turn by the
+   shortest path onto that face", and the roll needs both. */
+
+function qAxis(axis, angle) {
+  const [x, y, z] = v3.norm(axis), h = angle / 2, s = Math.sin(h);
+  return [Math.cos(h), x * s, y * s, z * s];
+}
+
+function qMul(a, b) {
+  return [
+    a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+    a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+    a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+    a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]
+  ];
+}
+
+function qApply(q, v) {
+  const [w, x, y, z] = q;
+  const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+  return [
+    v[0] + w * t[0] + y * t[2] - z * t[1],
+    v[1] + w * t[1] + z * t[0] - x * t[2],
+    v[2] + w * t[2] + x * t[1] - y * t[0]
+  ];
+}
+
+function qSlerp(a, b, u) {
+  let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  let end = b;
+  if (dot < 0) { end = b.map(c => -c); dot = -dot; }
+  if (dot > 0.9995) return qNorm(a.map((c, i) => c + (end[i] - c) * u));
+  const theta = Math.acos(dot), sin = Math.sin(theta);
+  const wa = Math.sin((1 - u) * theta) / sin, wb = Math.sin(u * theta) / sin;
+  return a.map((c, i) => c * wa + end[i] * wb);
+}
+
+function qNorm(q) {
+  const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return q.map(c => c / l);
+}
+
+/* The orientation that turns this face to the camera, then spins it in its
+   own plane by `roll` — which is what makes each landing look different. */
+
+function qFacing(die, faceIndex, roll) {
+  const idx = die.solid.faces[faceIndex];
+  const mid = centroid(idx.map(i => die.solid.verts[i]));
+  const n = v3.norm(mid);
+  const axis = v3.cross(n, VIEW);
+  const facing = Math.max(-1, Math.min(1, v3.dot(n, VIEW)));
+  /* A face already opposite the camera has no rotation axis to speak of —
+     turn it right over. Treating that as "no rotation needed" left the die
+     showing face 0 whenever the winner sat on the far side. */
+  const turn = v3.len(axis) > 1e-6 ? qAxis(axis, Math.acos(facing))
+    : facing > 0 ? [1, 0, 0, 0] : qAxis([0, 1, 0], Math.PI);
+  /* Cancel the face's own lean so its marking reads upright once it lands —
+     `roll` then tips it off square by just enough to look thrown. */
+  const laid = qApply(turn, faceBasis(die, faceIndex).u);
+  return qMul(qAxis(VIEW, roll - Math.atan2(laid[1], laid[0])), turn);
+}
+
+function faceBasis(die, face) {
+  const idx = die.solid.faces[face];
+  const mid = centroid(idx.map(i => die.solid.verts[i]));
+  const u = v3.norm(v3.sub(die.solid.verts[idx[0]], mid));
+  return { mid, u, w: v3.cross(v3.norm(mid), u) };
 }
 
 const dice = { group: document.getElementById('diceGroup'), dies: [], config: null };
 
-function setDiceFaces(parts) {
-  dice.dies.forEach((die, i) => {
-    die.label.textContent = parts[i];
-    sizeDieLabel(die);
-  });
-}
-
 const FLOOR = 880;
+
+/* Faces are numbered like a real die. A barrel's two end caps are not landing
+   faces, so they stay blank and the numbering runs over the sides only. */
+
+function landingFaces(die) {
+  const count = die.solid.faces.length;
+  const sides = dice.config.sides;
+  return Array.from({ length: Math.min(sides, count) }, (_, i) => i);
+}
 
 function buildDice(names) {
   dice.dies = [];
@@ -1383,120 +1491,151 @@ function buildDice(names) {
   dice.group.replaceChildren();
   dice.config = diceConfig(names.length);
   const spots = dice.config.percentile ? [325, 675] : [CX];
-  const r = dice.config.percentile ? 165 : 245;
-  /* Resting three-quarters on, so the top and one side stay in view — square
-     to the camera a die is just a polygon. The pair lean differently. */
-  const tilts = dice.config.percentile ? [-0.09, 0.08] : [-0.05];
+  const r = dice.config.percentile ? 150 : 215;
 
   spots.forEach((cx, i) => {
     const shadow = svgEl('ellipse', { cx, cy: FLOOR, rx: r * 0.8, ry: r * 0.17, fill: '#04060a', opacity: 0.5 });
     const body = svgEl('g', {});
-    const die = {
-      solid: solidFor(dice.config.sides), polys: [], shadow, body, cx, r,
-      rest: [-0.27 + tilts[i] * 0.4, 0.34 + tilts[i], tilts[i] * 0.5],
-      label: svgEl('text', { fill: '#241a05', ...nameStyle })
-    };
-    for (const _ of die.solid.faces) {
+    const die = { solid: solidFor(dice.config.sides), polys: [], marks: [], shadow, body, cx, r, index: i };
+
+    die.solid.faces.forEach(() => {
       const poly = svgEl('polygon', { stroke: '#9a7638', 'stroke-width': 3, 'stroke-linejoin': 'round' });
       die.polys.push(poly);
       body.append(poly);
-    }
-    body.append(die.label);
+    });
+    die.solid.faces.forEach((_, face) => {
+      const mark = svgEl('text', { fill: '#241a05', ...nameStyle });
+      die.marks.push(mark);
+      body.append(mark);
+    });
     dice.group.append(shadow, body);
     dice.dies.push(die);
-    poseDie(die, die.rest, 0);
+    numberFaces(die);
+    die.pose = { q: qFacing(die, 0, -0.35), height: 0, x: cx };
+    drawDie(die);
   });
-  setDiceFaces(dice.config.percentile ? ['d10', 'd10'] : [`d${dice.config.sides}`]);
 }
 
-/* height 0 is resting on the floor, 1 is the top of the throw. Bounces decay
-   the way a die's do — each hop lower and quicker than the last. */
+/* Marking size is set once, from how much flat room the face has — never per
+   frame. Everything is in solid units, which the face matrix scales to screen. */
 
-function bounceHeight(t) {
-  return Math.abs(Math.cos(Math.PI * 2.4 * t)) * (1 - t) ** 1.7;
+function markFace(die, face, text) {
+  const mark = die.marks[face];
+  mark.textContent = text;
+  const room = die.solid.room[face];
+  mark.setAttribute('font-size', Math.min(room * 0.95, room * 1.7 / Math.max(text.length * 0.56, 1)).toFixed(4));
 }
 
-function poseDie(die, angles, height) {
-  const lift = height * 470;
-  const cy = FLOOR - die.r * 1.05 - lift;
-  const squash = height < 0.02 ? 1 - 0.1 * Math.sin((0.02 - height) / 0.02 * Math.PI) : 1;
-  const view = paintDie(die, angles, die.cx, cy, die.r * squash);
+function numberFaces(die) {
+  const digits = dice.config.percentile;
+  landingFaces(die).forEach((face, i) => markFace(die, face, digits ? String(i) : String(i + 1)));
+}
 
-  /* Text is laid out horizontally, so what matters is the box the face
-     actually presents — a barrel's side band is wide and shallow, a d20's
-     triangle the opposite. Triangles get less of their box than the rest,
-     since their corners taper away from the line the text sits on. */
-  const spot = view.project(view.front.mid);
-  const corners = view.front.idx.map(i => view.project(view.pts[i]));
-  const xs = corners.map(p => p[0]), ys = corners.map(p => p[1]);
-  const tapered = corners.length === 3 ? 0.58 : 0.84;
-  die.faceWidth = (Math.max(...xs) - Math.min(...xs)) * tapered;
-  die.faceHeight = (Math.max(...ys) - Math.min(...ys)) * tapered * 0.72;
-  die.label.setAttribute('x', spot[0].toFixed(1));
-  die.label.setAttribute('y', (spot[1] + die.faceHeight * 0.16).toFixed(1));
-  sizeDieLabel(die);
+/* Three or four ballistic arcs across the whole throw, each lower and quicker
+   than the last. Returns height above the floor in [0, 1] plus how hard the
+   die is hitting right now, which is what drives the squash. */
 
-  die.shadow.setAttribute('rx', (die.r * 0.8 * (1 - height * 0.42)).toFixed(1));
-  die.shadow.setAttribute('ry', (die.r * 0.17 * (1 - height * 0.42)).toFixed(1));
+const HOPS = [[0, 0.3], [0.3, 0.55], [0.55, 0.73], [0.73, 0.85], [0.85, 1]];
+
+function bounce(t) {
+  const peaks = [1, 0.42, 0.16, 0.05, 0];
+  const hop = HOPS.findIndex(([, end]) => t < end);
+  const i = hop < 0 ? HOPS.length - 1 : hop;
+  const [start, end] = HOPS[i];
+  const u = (t - start) / (end - start);
+  const arc = i === 0 ? 1 - u * u : 4 * u * (1 - u);
+  const height = peaks[i] * Math.max(0, arc);
+  return { height, impact: Math.max(0, 1 - Math.abs(u - 1) * 9) * (peaks[i] || 0) };
+}
+
+function drawDie(die) {
+  const { q, height, x } = die.pose;
+  const squash = 1 - 0.16 * (die.pose.impact || 0);
+  const cy = FLOOR - die.r * (1 + height * 2.4);
+  const front = paintDie(die, q, x, cy, die.r, squash);
+  die.front = front;
+
+  const spread = 1 - height * 0.42;
+  die.shadow.setAttribute('cx', x.toFixed(1));
+  die.shadow.setAttribute('rx', (die.r * 0.8 * spread).toFixed(1));
+  die.shadow.setAttribute('ry', (die.r * 0.17 * spread).toFixed(1));
   die.shadow.setAttribute('opacity', (0.5 * (1 - height * 0.62)).toFixed(2));
 }
 
-function sizeDieLabel(die) {
-  const text = die.label.textContent;
-  if (!text) return;
-  const size = Math.min(fitFontSize(text, die.faceWidth || 300, 110), die.faceHeight || 110);
-  die.label.setAttribute('font-size', Math.max(26, size).toFixed(1));
-}
+/* The throw: travel at near-constant speed with light friction, tumbling
+   about a seeded axis, then turn onto the winning face by the shortest path
+   over the last quarter — so it falls onto the face rather than gliding. */
 
-function tumbleDie(die, eased, t) {
-  const away = 1 - eased;
-  poseDie(die, [
-    die.rest[0] + away * 15.2,
-    die.rest[1] + away * 11.4,
-    die.rest[2] + away * 6.8
-  ], bounceHeight(t));
-  const drift = -430 * away;
-  die.body.setAttribute('transform', `translate(${drift.toFixed(1)} 0)`);
-  die.shadow.setAttribute('cx', (die.cx + drift).toFixed(1));
-}
+const SETTLE_FROM = 0.72;
+const TRAVEL_UNTIL = 0.9;
 
-function restDie(die) {
-  die.body.removeAttribute('transform');
-  die.shadow.setAttribute('cx', die.cx);
-  poseDie(die, die.rest, 0);
-}
+function rollDie(die, plan, t) {
+  /* Friction is light, so travel is close to linear and keeps going almost to
+     the end — an exponent much above 1 puts the whole journey in the first
+     half-second and the die looks like it froze. */
+  const glide = Math.min(1, t / TRAVEL_UNTIL);
+  const travel = 1 - (1 - glide) ** 1.15;
+  die.pose.x = plan.fromX + (die.cx - plan.fromX) * travel;
 
-function diceFaces(ctx, rng) {
-  if (dice.config.percentile) {
-    const digits = String(ctx.index + 1).padStart(2, '0').split('');
-    return { final: digits, flick: () => [0, 1].map(() => String(Math.floor(rng() * 10))) };
+  const b = bounce(t);
+  die.pose.height = b.height;
+  die.pose.impact = b.impact;
+
+  if (t < SETTLE_FROM) {
+    const spun = qAxis(plan.axis, plan.spin * t * (2 - t / SETTLE_FROM));
+    die.pose.q = qNorm(qMul(spun, plan.start));
+    plan.handoff = die.pose.q;
+  } else {
+    const u = Math.min(1, (t - SETTLE_FROM) / (0.94 - SETTLE_FROM));
+    die.pose.q = qSlerp(plan.handoff || plan.start, plan.target, 1 - (1 - u) ** 3);
   }
-  return { final: [ctx.name], flick: () => [stage.names[Math.floor(rng() * stage.names.length)]] };
+  drawDie(die);
+}
+
+function dicePlan(die, faceIndex, rng) {
+  return {
+    fromX: die.cx - 470 + rng() * 60,
+    axis: [rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1],
+    spin: 11 + rng() * 6,
+    start: qAxis([rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1], rng() * 6.28),
+    target: qFacing(die, faceIndex, (rng() - 0.5) * 0.5),
+    handoff: null
+  };
+}
+
+function diceTargets(ctx) {
+  if (!dice.config.percentile) return [ctx.index];
+  const digits = String(ctx.index + 1).padStart(2, '0').split('');
+  return digits.map(d => Number(d));
 }
 
 function playDice(ctx) {
-  const { final, flick } = diceFaces(ctx, mulberry32(ctx.seed));
+  const rng = mulberry32(ctx.seed);
+  const targets = diceTargets(ctx);
+  const plans = dice.dies.map((die, i) => dicePlan(die, targets[i] % die.solid.faces.length, rng));
+
   const settle = () => {
-    dice.dies.forEach(restDie);
-    setDiceFaces(final);
+    dice.dies.forEach((die, i) => {
+      numberFaces(die);
+      die.pose = { q: plans[i].target, height: 0, x: die.cx, impact: 0 };
+      drawDie(die);
+      if (!dice.config.percentile) markFace(die, targets[i], ctx.name);
+      drawDie(die);
+    });
   };
   if (ctx.instant) {
     settle();
     return ctx.done();
   }
-  const flicks = Array.from({ length: 18 }, flick);
-  let shown = -1;
+  let lastHop = -1;
 
   animate({
     durationMs: ctx.durationMs,
-    ease: easeOutCubic,
-    frame: (eased, t) => {
-      for (const die of dice.dies) tumbleDie(die, eased, t);
-      const i = Math.min(flicks.length - 1, Math.floor(eased * flicks.length));
-      if (i === shown) return;
-      shown = i;
-      setDiceFaces(t > 0.86 ? final : flicks[i]);
-      audio.tick();
+    ease: t => t,
+    frame: (_, t) => {
+      dice.dies.forEach((die, i) => rollDie(die, plans[i], t));
+      const hop = HOPS.findIndex(([, end]) => t < end);
+      if (hop !== lastHop) { lastHop = hop; audio.tick(); }
     },
     done: () => {
       settle();
