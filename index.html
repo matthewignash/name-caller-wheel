@@ -206,6 +206,10 @@
     filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
   }
 
+  [data-picker="sticks"] .wheel-svg {
+    filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.4));
+  }
+
   .flapper {
     position: absolute;
     top: -14px;
@@ -700,6 +704,18 @@
 
       <div class="picker" data-picker="sticks">
         <svg class="wheel-svg" viewBox="0 0 1000 1000" role="img" aria-label="Cup of name sticks">
+          <defs>
+            <linearGradient id="cupWall" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#5d3517"/>
+              <stop offset="34%" stop-color="#96602c"/>
+              <stop offset="72%" stop-color="#7c4a21"/>
+              <stop offset="100%" stop-color="#4d2c12"/>
+            </linearGradient>
+            <radialGradient id="cupWell" cx="50%" cy="34%" r="62%">
+              <stop offset="0%" stop-color="#160c04"/>
+              <stop offset="100%" stop-color="#3b2110"/>
+            </radialGradient>
+          </defs>
           <g id="sticksGroup"></g>
         </svg>
       </div>
@@ -1345,9 +1361,8 @@ function solidFor(sides) {
 
 const LIGHT = v3.norm([-0.4, -0.72, 0.56]);
 
-function faceFill(shade) {
-  const tone = c => Math.round(c * shade);
-  return `rgb(${tone(247)} ${tone(238)} ${tone(214)})`;
+function faceFill(shade, base = [247, 238, 214]) {
+  return `rgb(${base.map(c => Math.round(c * shade)).join(' ')})`;
 }
 
 const VIEW = [0, 0, 1];
@@ -1376,7 +1391,7 @@ function paintDie(die, q, cx, cy, r, squash = 1) {
     if (!face) return poly.setAttribute('display', 'none');
     poly.removeAttribute('display');
     poly.setAttribute('points', face.idx.map(j => project(pts[j]).map(n => n.toFixed(1)).join(',')).join(' '));
-    poly.setAttribute('fill', faceFill(0.55 + 0.45 * Math.max(0, v3.dot(face.normal, LIGHT))));
+    poly.setAttribute('fill', faceFill(0.55 + 0.45 * Math.max(0, v3.dot(face.normal, LIGHT)), die.tone));
   });
 
   const shown = new Set(visible.map(f => f.face));
@@ -1708,83 +1723,214 @@ function playBall(ctx) {
    Blank sides out, so the sticks give nothing away: the one that rises is
    chosen by the seed, and the name only exists once it has flipped over. */
 
-const sticks = { group: document.getElementById('sticksGroup'), items: [], cup: null };
+const sticks = { group: document.getElementById('sticksGroup'), items: [], drawn: null, layers: null };
 
-const PULLED_Y = 300;
+/* The fan converges on a point down inside the cup, so the sticks splay from
+   somewhere real. Giving each its own pivot at the mouth — as this used to —
+   strings them along a flat line and they read as a slab, not a bundle. */
 
-function stickAt(index, total) {
-  const spread = Math.min(64, 6 * total);
-  const angle = total === 1 ? 0 : -spread / 2 + index * (spread / (total - 1));
-  const lean = angle * Math.PI / 180;
-  return { x: CX + Math.sin(lean) * 210, y: 545 - Math.cos(lean) * 15, angle };
+const PIVOT = { x: CX, y: 900 };
+const MOUTH = 690;
+const STICK_LEN = 300;
+const STICK_HALF = 26;
+
+function stickLean(index, total) {
+  const spread = Math.min(58, 9 * Math.max(total - 1, 1));
+  return total === 1 ? 0 : -spread / 2 + index * (spread / (total - 1));
+}
+
+function restPose(lean) {
+  return `rotate(${lean.toFixed(2)} ${PIVOT.x} ${PIVOT.y})`;
+}
+
+/* Wood, lit by its own lean: a stick angled away from the light sits darker,
+   and a little seeded variation keeps them from looking printed. */
+
+function stickShade(lean, jitter) {
+  const facing = Math.cos((lean - 26) * Math.PI / 180);
+  return faceFill(0.62 + 0.3 * Math.max(0, facing) + jitter, [216, 168, 104]);
 }
 
 function buildSticks(names) {
   sticks.items = [];
+  sticks.drawn = null;
   if (!names.length) return stageMessage(sticks.group);
-  const shown = Math.min(names.length, 24);
+  const shown = Math.min(names.length, 14);
+  const rng = mulberry32(shown * 7717);
   sticks.group.replaceChildren();
 
+  const behind = svgEl('g', {});
+  const bundle = svgEl('g', {});
+  const front = svgEl('g', {});
+  sticks.layers = { behind, bundle, front };
+
+  behind.append(
+    svgEl('ellipse', { cx: CX, cy: 960, rx: 250, ry: 42, fill: '#04060a', opacity: 0.45 }),
+    svgEl('ellipse', { cx: CX, cy: MOUTH, rx: 196, ry: 52, fill: 'url(#cupWell)' })
+  );
+
   for (let i = 0; i < shown; i++) {
-    const at = stickAt(i, shown);
-    const stick = svgEl('g', { transform: stickPose(at, 0, 1) });
-    const label = svgEl('text', { x: 0, y: 0, transform: 'rotate(-90)', fill: '#5a3417', opacity: 0, ...nameStyle });
-    stick.append(
-      svgEl('rect', { x: -30, y: -250, width: 60, height: 500, rx: 30, fill: '#d9ac6a', stroke: '#a97c3d', 'stroke-width': 5 }),
-      label
-    );
-    sticks.group.append(stick);
-    sticks.items.push({ el: stick, label, at });
+    const lean = stickLean(i, shown);
+    /* No two sit at the same depth in a real cup. */
+    const sunk = rng() * 46;
+    const stick = svgEl('g', { transform: restPose(lean) });
+    stick.append(svgEl('rect', {
+      x: CX - STICK_HALF, y: MOUTH - STICK_LEN + sunk, width: STICK_HALF * 2, height: STICK_LEN + 190 - sunk, rx: STICK_HALF,
+      fill: stickShade(lean, rng() * 0.06), stroke: '#8a6231', 'stroke-width': 3
+    }));
+    stick.append(svgEl('rect', {
+      x: CX - STICK_HALF * 0.34, y: MOUTH - STICK_LEN + sunk + 26, width: STICK_HALF * 0.68, height: STICK_LEN - 60, rx: 8,
+      fill: '#f0cf9a', opacity: 0.24
+    }));
+    bundle.append(stick);
+    sticks.items.push({ el: stick, lean });
   }
-  sticks.cup = svgEl('path', { d: `M ${CX - 190} 700 L ${CX + 190} 700 L ${CX + 150} 950 L ${CX - 150} 950 Z`, fill: '#7c4a21', stroke: '#5a3417', 'stroke-width': 8 });
-  sticks.group.append(sticks.cup);
+
+  front.append(
+    svgEl('path', { d: `M ${CX - 196} ${MOUTH} A 196 52 0 0 0 ${CX + 196} ${MOUTH} L ${CX + 150} 946 A 150 40 0 0 1 ${CX - 150} 946 Z`, fill: 'url(#cupWall)' }),
+    svgEl('ellipse', { cx: CX, cy: MOUTH, rx: 196, ry: 52, fill: 'none', stroke: '#a9702f', 'stroke-width': 9 })
+  );
+  sticks.group.append(behind, bundle, front);
 }
 
-/* The flip scales across the stick's width, not its length — squashing the
-   long axis would read as the stick shrinking rather than turning over. */
+/* The drawn stick is a real box rendered through the dice pipeline, so its
+   edge turns into view and the name foreshortens with the face instead of
+   being squashed flat. */
 
-function stickPose(at, pulled, flip) {
-  const x = at.x + (CX - at.x) * pulled;
-  const y = at.y + (PULLED_Y - at.y) * pulled;
-  const angle = at.angle + (90 - at.angle) * pulled;
-  return `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(1)}) scale(${flip.toFixed(3)} 1)`;
+/* Same half-length as the sticks in the cup, so the one drawn out is plainly
+   the same object and not a bigger prop. */
+
+const DRAWN_HALF = (STICK_LEN + 190) / 2;
+
+function stickSolid() {
+  const w = STICK_HALF / DRAWN_HALF, d = 0.05;
+  const verts = [];
+  for (const x of [w, -w]) for (const y of [1, -1]) for (const z of [d, -d]) verts.push([x, y, z]);
+  const faces = [];
+  for (const axis of [0, 1, 2]) {
+    for (const side of [1, -1]) {
+      faces.push(verts.flatMap((v, i) => Math.sign(v[axis]) === side ? [i] : []));
+    }
+  }
+  return { verts, faces: faces.map(f => orderFace(f, verts)) };
 }
+
+const STICK_SOLID = stickSolid();
+
+/* The stick starts already half-turned, so this face — the one that reads
+   upright at identity — faces away until the turn brings it round. Marking
+   the far face instead would land the name mirrored: a half-turn reverses
+   the face's winding, and with it the text's basis. */
+const NAME_FACE = 4;
+
+/* placeMark aligns a marking to the direction of the face's first corner. On
+   a square-ish die face that is close enough to straight; on a long thin
+   stick the corner sits several degrees off the length, so the name would
+   sit visibly crooked. Measure that offset once and cancel it. */
+
+function markSkew(face) {
+  const idx = STICK_SOLID.faces[face];
+  const mid = centroid(idx.map(i => STICK_SOLID.verts[i]));
+  const u = v3.norm(v3.sub(STICK_SOLID.verts[idx[0]], mid));
+  const w = v3.cross(v3.norm(mid), u);
+  const along = [0, 1, 0];
+  const skew = Math.atan2(v3.dot(along, w), v3.dot(along, u)) * 180 / Math.PI;
+  /* Fold to the nearest half-turn: we want the text lying along the stick,
+     not pointing down it, or it lands upside down. */
+  return skew - 180 * Math.round(skew / 180);
+}
+
+function makeDrawnStick() {
+  const body = svgEl('g', {});
+  const stick = { solid: STICK_SOLID, polys: [], marks: [], tone: [216, 168, 104], body };
+  STICK_SOLID.faces.forEach(() => {
+    const poly = svgEl('polygon', { stroke: '#8a6231', 'stroke-width': 2.5, 'stroke-linejoin': 'round' });
+    stick.polys.push(poly);
+    body.append(poly);
+  });
+  STICK_SOLID.faces.forEach((_, face) => {
+    const mark = svgEl('g', {});
+    mark.append(svgEl('text', { transform: `rotate(${markSkew(face).toFixed(2)})`, fill: '#4a2c10', ...nameStyle }));
+    stick.marks.push(mark);
+    body.append(mark);
+  });
+  return stick;
+}
+
+/* One continuous draw. Every phase hands straight to the next, so there is no
+   stretch of the roll where nothing moves. */
+
+function stickPose(t) {
+  const dip = t < 0.12 ? Math.sin(t / 0.12 * Math.PI) * 26 : 0;
+  const rise = t < 0.12 ? 0 : Math.min(1, (t - 0.12) / 0.43);
+  const swing = t < 0.55 ? 0 : Math.min(1, (t - 0.55) / 0.23);
+  const turn = t < 0.78 ? 0 : Math.min(1, (t - 0.78) / 0.14);
+  const wobble = t < 0.92 ? 0 : Math.sin((t - 0.92) / 0.08 * Math.PI * 2) * (1 - (t - 0.92) / 0.08) * 0.06;
+  /* Gentle exponents: anything steeper puts the whole lift in the first
+     half-second, which is exactly how this and the dice went wrong before. */
+  return { dip, rise: 1 - (1 - rise) ** 1.35, swing: 1 - (1 - swing) ** 1.4, turn, wobble };
+}
+
+function drawStick(stick, lean, p) {
+  const y = MOUTH - 40 + p.dip - p.rise * 300 - p.swing * 90;
+  const x = CX + Math.sin(lean * Math.PI / 180) * 120 * (1 - p.swing);
+  const tilt = (lean * (1 - p.swing) + 90 * p.swing + p.wobble * 180) * Math.PI / 180;
+  const q = qMul(qAxis([0, 0, 1], tilt), qAxis([0, 1, 0], Math.PI * (1 - p.turn)));
+  paintDie(stick, q, x, y, DRAWN_HALF);
+}
+
+function neighbourLean(item, drawnLean, t) {
+  const close = Math.max(0, 1 - Math.abs(item.lean - drawnLean) / 26);
+  const settle = t < 0.12 ? 0 : Math.min(1, (t - 0.12) / 0.4);
+  const shift = close * Math.sign(drawnLean - item.lean || 1) * 4.5 * (1 - (1 - settle) ** 2);
+  item.el.setAttribute('transform', restPose(item.lean + shift));
+}
+
+/* Put the cup back the way it was: every stick visible and upright, and last
+   round's drawn stick out of the scene. */
 
 function resetSticks() {
   for (const s of sticks.items) {
-    s.el.setAttribute('transform', stickPose(s.at, 0, 1));
-    s.label.setAttribute('opacity', 0);
-    sticks.group.append(s.el);
+    s.el.removeAttribute('display');
+    s.el.setAttribute('transform', restPose(s.lean));
   }
-  sticks.group.append(sticks.cup);
+  sticks.drawn?.body.remove();
 }
 
 function playSticks(ctx) {
-  const item = sticks.items[Math.floor(mulberry32(ctx.seed)() * sticks.items.length)];
+  const rng = mulberry32(ctx.seed);
+  const item = sticks.items[Math.floor(rng() * sticks.items.length)];
+  const stick = sticks.drawn || (sticks.drawn = makeDrawnStick());
+  const name = ctx.name;
   resetSticks();
-  sticks.group.append(item.el);
-  const show = () => {
-    item.label.textContent = ctx.name;
-    item.label.setAttribute('font-size', fitFontSize(ctx.name, 440, 78).toFixed(1));
-    item.label.setAttribute('opacity', 1);
+
+  const land = () => {
+    item.el.setAttribute('display', 'none');
+    sticks.layers.front.after(stick.body);
+    const face = stick.marks[NAME_FACE].firstChild;
+    face.textContent = name;
+    face.setAttribute('font-size', fitFontSize(name, 1.75, 0.4).toFixed(4));
   };
   if (ctx.instant) {
-    item.el.setAttribute('transform', stickPose(item.at, 1, 1));
-    show();
+    land();
+    drawStick(stick, item.lean, stickPose(1));
     return ctx.done();
   }
+  land();
+  let beat = -1;
 
   animate({
     durationMs: ctx.durationMs,
-    ease: easeOutCubic,
-    frame: eased => {
-      const flip = eased < 0.72 ? 1 : Math.abs(Math.cos((eased - 0.72) / 0.28 * Math.PI));
-      item.el.setAttribute('transform', stickPose(item.at, Math.min(1, eased / 0.65), Math.max(0.05, flip)));
-      if (eased > 0.86) show();
+    ease: t => t,
+    frame: (_, t) => {
+      const p = stickPose(t);
+      drawStick(stick, item.lean, p);
+      for (const other of sticks.items) if (other !== item) neighbourLean(other, item.lean, t);
+      const now = t < 0.55 ? 0 : t < 0.78 ? 1 : 2;
+      if (now !== beat) { beat = now; audio.tick(); }
     },
     done: () => {
-      item.el.setAttribute('transform', stickPose(item.at, 1, 1));
-      show();
+      drawStick(stick, item.lean, stickPose(1));
       ctx.done();
     }
   });
