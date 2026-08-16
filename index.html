@@ -697,6 +697,11 @@
               <stop offset="42%" stop-color="#161b26"/>
               <stop offset="100%" stop-color="#04060a"/>
             </radialGradient>
+            <radialGradient id="ballWell" cx="50%" cy="36%" r="72%">
+              <stop offset="0%" stop-color="#14243f"/>
+              <stop offset="60%" stop-color="#070c1a"/>
+              <stop offset="100%" stop-color="#02040a"/>
+            </radialGradient>
           </defs>
           <g id="ballGroup"></g>
         </svg>
@@ -1664,58 +1669,118 @@ function playDice(ctx) {
    carrying the name. The jitter is a seeded sequence sampled by time, so
    every screen shakes the same way. */
 
-const ball = { group: document.getElementById('ballGroup'), badge: null, window: null, label: null };
+const ball = { group: document.getElementById('ballGroup'), badge: null, window: null, die: null, label: null };
+
+const BALL_R = 470;
+const CAP_R = 236;
 
 function buildBall(names) {
   if (!names.length) return stageMessage(ball.group);
-  ball.group.removeAttribute('transform');
   ball.badge = svgEl('g', {});
   ball.badge.append(
-    svgEl('circle', { cx: CX, cy: CY, r: 150, fill: '#f6f1e5' }),
-    svgEl('text', { x: CX, y: CY + 6, fill: '#10131a', 'font-size': 190, ...nameStyle }, '8')
+    svgEl('circle', { r: 150, fill: '#f6f1e5' }),
+    svgEl('text', { y: 6, fill: '#10131a', 'font-size': 190, ...nameStyle }, '8')
   );
-  ball.window = svgEl('g', { opacity: 0 });
-  ball.label = svgEl('text', { x: CX, y: CY + 4, fill: '#dbe6ff', ...nameStyle });
-  ball.window.append(
-    svgEl('circle', { cx: CX, cy: CY, r: 235, fill: '#0a0f1c', stroke: '#2a3346', 'stroke-width': 8 }),
-    svgEl('polygon', { points: `${CX},${CY - 190} ${CX + 200},${CY + 130} ${CX - 200},${CY + 130}`, fill: '#274bb5' }),
+
+  ball.label = svgEl('text', { y: 4, fill: '#dbe6ff', ...nameStyle });
+  ball.die = svgEl('g', {});
+  ball.die.append(
+    svgEl('polygon', { points: `0,-190 200,130 -200,130`, fill: '#274bb5' }),
     ball.label
   );
-  ball.group.replaceChildren(
-    svgEl('circle', { cx: CX, cy: CY, r: 470, fill: 'url(#ballShade)', stroke: '#2b3446', 'stroke-width': 6 }),
-    svgEl('ellipse', { cx: CX - 168, cy: CY - 212, rx: 96, ry: 54, fill: '#f6f1e5', opacity: 0.09, transform: `rotate(-28 ${CX - 168} ${CY - 212})` }),
-    ball.badge,
-    ball.window
+  ball.window = svgEl('g', {});
+  ball.window.append(
+    svgEl('circle', { r: CAP_R, fill: 'url(#ballWell)', stroke: '#2a3346', 'stroke-width': 8 }),
+    ball.die
   );
+
+  ball.group.replaceChildren(
+    svgEl('circle', { cx: CX, cy: CY, r: BALL_R, fill: 'url(#ballShade)', stroke: '#2b3446', 'stroke-width': 6 }),
+    svgEl('ellipse', { cx: CX - 168, cy: CY - 212, rx: 96, ry: 54, fill: '#f6f1e5', opacity: 0.09, transform: `rotate(-28 ${CX - 168} ${CY - 212})` }),
+    ball.window,
+    ball.badge
+  );
+  drawBall(ballPose(0));
+}
+
+/* One shake, one turn, one surfacing — the windows tile the whole roll, so
+   there is no stretch where the ball just sits there. */
+
+function ballPose(t) {
+  const shake = t < 0.42 ? 1 - t / 0.42 : 0;
+  /* A shallow decay: the shake has to stay lively right up to the turn, or
+     the two phases meet at a dead spot. */
+  const swing = Math.sin(t / 0.42 * Math.PI * 5.5) * shake ** 0.55;
+  const turn = t < 0.42 ? 0 : Math.min(1, (t - 0.42) / 0.28);
+  const surface = t < 0.70 ? 0 : Math.min(1, (t - 0.70) / 0.20);
+  const rock = t < 0.90 ? 0 : Math.sin((t - 0.90) / 0.10 * Math.PI * 3) * (1 - (t - 0.90) / 0.10);
+  return { swing, turn: 1 - (1 - turn) ** 1.6, surface: 1 - (1 - surface) ** 1.7, rock };
+}
+
+/* A disc riding a sphere: its centre projects straight out along the rotated
+   direction, and it squashes by how far it has turned from the camera —
+   which is all "turning the ball over" needs, since a sphere's body looks
+   the same from every angle. */
+
+function placeCap(el, dir, q) {
+  const d = qApply(q, dir);
+  if (d[2] <= 0.02) return el.setAttribute('display', 'none');
+  el.removeAttribute('display');
+  el.setAttribute('transform',
+    `translate(${(CX + d[0] * BALL_R * 0.62).toFixed(1)} ${(CY + d[1] * BALL_R * 0.62).toFixed(1)}) scale(${d[2].toFixed(3)} 1)`);
+  return d;
+}
+
+function drawBall(p) {
+  const lean = p.swing * 7;
+  ball.group.setAttribute('transform',
+    `translate(${(p.swing * 74).toFixed(1)} ${(p.swing * p.swing * 26).toFixed(1)}) rotate(${lean.toFixed(2)} ${CX} ${CY})`);
+
+  /* Turning about the vertical keeps the window's path in one plane, so it
+     arrives face-on with no in-plane spin and the name reads upright. */
+  const q = qAxis([0, 1, 0], Math.PI * p.turn);
+  placeCap(ball.badge, [0, 0, 1], q);
+  placeCap(ball.window, [0, 0, -1], q);
+
+  const rise = 150 * (1 - p.surface);
+  const grow = 0.55 + 0.45 * p.surface;
+  ball.die.setAttribute('opacity', p.surface.toFixed(3));
+  ball.die.setAttribute('transform',
+    `translate(0 ${rise.toFixed(1)}) rotate(${(p.rock * 5).toFixed(2)}) scale(${grow.toFixed(3)})`);
+}
+
+function resetBall() {
+  ball.label.textContent = '';
+  drawBall(ballPose(0));
 }
 
 function playBall(ctx) {
-  const rng = mulberry32(ctx.seed);
-  const reveal = () => {
-    ball.group.removeAttribute('transform');
-    ball.badge.setAttribute('opacity', 0);
-    ball.window.setAttribute('opacity', 1);
+  const settle = () => {
     ball.label.textContent = ctx.name;
     ball.label.setAttribute('font-size', fitFontSize(ctx.name, 330, 92).toFixed(1));
+    drawBall(ballPose(1));
   };
   if (ctx.instant) {
-    reveal();
+    settle();
     return ctx.done();
   }
-  ball.badge.setAttribute('opacity', 1);
-  ball.window.setAttribute('opacity', 0);
-  const shakes = Array.from({ length: 40 }, () => [rng() * 2 - 1, rng() * 2 - 1]);
+  resetBall();
+  ball.label.textContent = ctx.name;
+  ball.label.setAttribute('font-size', fitFontSize(ctx.name, 330, 92).toFixed(1));
+  let beat = -1;
 
   animate({
     durationMs: ctx.durationMs,
     ease: t => t,
     frame: (_, t) => {
-      const settling = Math.max(0, 1 - t / 0.7);
-      const [jx, jy] = shakes[Math.min(shakes.length - 1, Math.floor(t * shakes.length))];
-      ball.group.setAttribute('transform', `translate(${(jx * 70 * settling).toFixed(1)} ${(jy * 55 * settling).toFixed(1)})`);
-      if (t > 0.7 && ball.badge.getAttribute('opacity') !== '0') reveal();
+      drawBall(ballPose(t));
+      const now = t < 0.42 ? 0 : t < 0.70 ? 1 : 2;
+      if (now !== beat) { beat = now; audio.tick(); }
     },
-    done: ctx.done
+    done: () => {
+      settle();
+      ctx.done();
+    }
   });
 }
 
