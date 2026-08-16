@@ -1669,7 +1669,7 @@ function playDice(ctx) {
    carrying the name. The jitter is a seeded sequence sampled by time, so
    every screen shakes the same way. */
 
-const ball = { group: document.getElementById('ballGroup'), badge: null, window: null, die: null, label: null };
+const ball = { group: document.getElementById('ballGroup'), badge: null, window: null, die: null, label: null, turn: 0 };
 
 const BALL_R = 470;
 const CAP_R = 236;
@@ -1700,7 +1700,8 @@ function buildBall(names) {
     ball.window,
     ball.badge
   );
-  drawBall(ballPose(0));
+  ball.turn = 0;
+  drawBall(ballPose(0), 0);
 }
 
 /* One shake, one turn, one surfacing — the windows tile the whole roll, so
@@ -1731,14 +1732,14 @@ function placeCap(el, dir, q) {
   return d;
 }
 
-function drawBall(p) {
+function drawBall(p, angle) {
   const lean = p.swing * 7;
   ball.group.setAttribute('transform',
     `translate(${(p.swing * 74).toFixed(1)} ${(p.swing * p.swing * 26).toFixed(1)}) rotate(${lean.toFixed(2)} ${CX} ${CY})`);
 
   /* Turning about the vertical keeps the window's path in one plane, so it
      arrives face-on with no in-plane spin and the name reads upright. */
-  const q = qAxis([0, 1, 0], Math.PI * p.turn);
+  const q = qAxis([0, 1, 0], angle);
   placeCap(ball.badge, [0, 0, 1], q);
   placeCap(ball.window, [0, 0, -1], q);
 
@@ -1749,16 +1750,30 @@ function drawBall(p) {
     `translate(0 ${rise.toFixed(1)}) rotate(${(p.rock * 5).toFixed(2)}) scale(${grow.toFixed(3)})`);
 }
 
+const FACING = Math.PI;
+
+/* The ball rests showing the last answer, so a new spin must carry on from
+   there rather than jumping back to the 8 — that snap is a visible flash of
+   the ball resetting before it has done anything. Always turn forward:
+   however much is needed to land window-forward, plus a whole turn, so the
+   8 sweeps past on the way round. */
+
+function turnFrom(angle) {
+  const need = ((FACING - angle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  return need + 2 * Math.PI;
+}
+
 function resetBall() {
   ball.label.textContent = '';
-  drawBall(ballPose(0));
+  drawBall(ballPose(0), ball.turn);
 }
 
 function playBall(ctx) {
   const settle = () => {
+    ball.turn = FACING;
     ball.label.textContent = ctx.name;
     ball.label.setAttribute('font-size', fitFontSize(ctx.name, 330, 92).toFixed(1));
-    drawBall(ballPose(1));
+    drawBall(ballPose(1), FACING);
   };
   if (ctx.instant) {
     settle();
@@ -1767,13 +1782,15 @@ function playBall(ctx) {
   resetBall();
   ball.label.textContent = ctx.name;
   ball.label.setAttribute('font-size', fitFontSize(ctx.name, 330, 92).toFixed(1));
+  const from = ball.turn, sweep = turnFrom(from);
   let beat = -1;
 
   animate({
     durationMs: ctx.durationMs,
     ease: t => t,
     frame: (_, t) => {
-      drawBall(ballPose(t));
+      const p = ballPose(t);
+      drawBall(p, from + sweep * p.turn);
       const now = t < 0.42 ? 0 : t < 0.70 ? 1 : 2;
       if (now !== beat) { beat = now; audio.tick(); }
     },
